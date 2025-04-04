@@ -98,31 +98,25 @@ process minimap2_human {
         """
 }
 
-process collect_summary {
+process evaluate {
 
-    container 'community.wave.seqera.io/library/pip_mako_matplotlib_natsort_pruned:44e99f335376fa3b'
+    container 'community.wave.seqera.io/library/numpy_pandas_python:707bf65260f82405'
 
     input:
-    path reports
-    path metadata
-    path site_key
-    path template
-    path plots
+    tuple val(unique_id), path(charon_report), path(human_sam), path(microbial_sam)
 
     output:
-    path "summary_report/*.html"
+    path "${unique_id}_summary.csv"
 
-    publishDir "${params.outdir}/", mode: 'copy' // Publish final report to local directory specified in params.config
+    publishDir "${params.outdir}/", mode: 'copy'
 
     script:
     """
-    make_sum_report.py \
-      --reports ${reports.join(' ')} \
-      --metadata ${metadata} \
-      --site_key ${site_key} \
-      --plots_dir ${plots}/ \
-      --final_report summary_report/ \
-      --template ${template}
+    evaluate.py \
+      -i ${charon_report} \
+      --microbial_sam ${microbial_sam} \
+      --host_sam ${host_sam} \
+      --output "${unique_id}_summary.csv"
     """
 }
 
@@ -130,7 +124,9 @@ process collect_summary {
 workflow evaluate_charon {
     unique_id = "${params.unique_id}"
     fastq = file(params.fastq, type: "file", checkIfExists:true)
+    report = file(params.charon_report, type: "file", checkIfExists:true)
     fastq_ch = Channel.from([[unique_id, fastq]])
+    report_ch = Channel.from([[unique_id, report]])
 
     db = file(params.db, type: "file", checkIfExists:true)
     refs = file("$projectDir/resources/hcid_refs.fa.gz", type: "file", checkIfExists:true)
@@ -140,5 +136,11 @@ workflow evaluate_charon {
 
     run_charon_human(fastq_ch, db)
     minimap2_human(run_charon_human.out.fastq, refs)
+
+    report_ch.combine(minimap2_microbial.out, by: 0)
+             .combine(minimap2_human.out, by: 0)
+             .set{ eval_ch }
+
+    evaluate(eval_ch)
 
 }
