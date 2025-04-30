@@ -13,6 +13,10 @@ if (!params.db) {
     exit 1, "Please provide --db when running Nextflow."
 }
 
+if (params.read_type == "illumina") {
+    exit 1, "I don't support paired end reads yet"
+}
+
 workflow {
     evaluate_charon()
 }
