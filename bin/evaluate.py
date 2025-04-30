@@ -138,7 +138,7 @@ def generate_summary(df):
         summary[f"max_{column}_microbial_map_microbial"] = df_microbial_microbial[column].max()
         summary[f"min_{column}_microbial_map_microbial"] = df_microbial_microbial[column].min()
 
-    return summary
+    return summary, microbial_host_df
 
 # Main method
 def main():
@@ -177,20 +177,22 @@ def main():
     time = now.strftime("%m/%d/%Y, %H:%M:%S")
     sys.stderr.write("PROGRAM START TIME: " + time + "\n")
 
-    data_file = Path(args.prefix + "_data.csv")
-    if not data_file.is_file():
+    full_file = Path(args.prefix + "_full.csv")
+    if not full_file.is_file():
         mapped_df = load_both_sam(args.host_sam, args.microbial_sam)
         charon_df = load_charon_output(args.input)
         sys.stderr.write("COMBINE CHARON AND MAPPING DATA\n")
         charon_df.set_index("read_id")
         charon_df = charon_df.merge(mapped_df, how="left")
         charon_df["unmapped"] = charon_df["mapped_length"].isna()
-        charon_df.to_csv(data_file, index=False)
+        charon_df.to_csv(full_file, index=False)
     else:
-        charon_df = pd.read_csv(data_file, index_col=None)
+        charon_df = pd.read_csv(full_file, index_col=None)
         charon_df['classification'] = charon_df['classification'].fillna("")
 
-    summary = generate_summary(charon_df)
+    summary,microbial_host_df = generate_summary(charon_df)
+    data_file = Path(args.prefix + "_data.csv")
+    microbial_host_df.to_csv(data_file, index=False)
 
     # Save to CSV
     fieldnames = ["file"] + list(summary.keys())
