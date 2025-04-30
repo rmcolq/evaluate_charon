@@ -1,14 +1,18 @@
-include { evaluate_negative_controls } from './modules/summary_report'
+include { evaluate_charon } from './modules/charon'
 
 // Check if required parameters are provided
-if (!params.reports) {
-    exit 1, "Please provide --reports when running Nextflow."
+if (!params.unique_id) {
+    exit 1, "Please provide --unique_id when running Nextflow."
 }
 
-if (!params.metadata) {
-    exit 1, "Please provide --metadata when running Nextflow."
+if (!params.fastq) {
+    exit 1, "Please provide --fastq when running Nextflow."
+}
+
+if (!params.db) {
+    exit 1, "Please provide --db when running Nextflow."
 }
 
 workflow {
-    evaluate_negative_controls()
+    evaluate_charon()
 }
