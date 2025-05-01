@@ -100,28 +100,39 @@ def generate_summary(df):
     host_total = df_host.shape[0]
     host_unmapped_df = df_host[df_host["unmapped"] == True]
     summary["num_host_unmapped"] = host_unmapped_df.shape[0]
-    summary["prop_host_unmapped"] = summary["num_host_unmapped"]/host_total*100
     df_host = df_host[df_host["unmapped"] == False]
     host_ebv_df = df_host[df_host["ref"].isin(["NC_007605.1","NC_009334.1"])]
     summary["num_host_map_ebv"] = host_ebv_df.shape[0]
-    summary["prop_host_map_ebv"] = summary["num_host_map_ebv"]/host_total*100
     host_host_df = df_host[~df_host["ref"].isin(["NC_007605.1","NC_009334.1"])]
     summary["num_host_map_host"] = host_host_df.shape[0]
-    summary["prop_host_map_host"] = summary["num_host_map_host"]/host_total*100
+    if host_total > 0:
+        summary["prop_host_unmapped"] = summary["num_host_unmapped"]/host_total*100
+        summary["prop_host_map_ebv"] = summary["num_host_map_ebv"]/host_total*100
+        summary["prop_host_map_host"] = summary["num_host_map_host"]/host_total*100
+    else:
+        summary["prop_host_unmapped"] = 0
+        summary["prop_host_map_ebv"] = 0
+        summary["prop_host_map_host"] = 0
 
     #4. Of the microbial reads, what proportion map back to the host reference genome, or EBV?
     df_microbial = df[df["classification"] == "microbial"]
     microbial_total = df_microbial.shape[0]
     microbial_unmapped_df = df_microbial[df_microbial["unmapped"] == True]
     summary["num_microbial_unmapped"] = microbial_unmapped_df.shape[0]
-    summary["prop_microbial_unmapped"] = summary["num_microbial_unmapped"]/microbial_total*100
     df_microbial = df_microbial[df_microbial["unmapped"] == False]
     microbial_ebv_df = df_microbial[df_microbial["ref"].isin(["NC_007605.1","NC_009334.1"])]
     summary["num_microbial_map_ebv"] = microbial_ebv_df.shape[0]
-    summary["prop_microbial_map_ebv"] = summary["num_microbial_map_ebv"]/microbial_total*100
     microbial_host_df = df_microbial[~df_microbial["ref"].isin(["NC_007605.1","NC_009334.1"])]
     summary["num_microbial_map_host"] = microbial_host_df.shape[0]
-    summary["prop_microbial_map_host"] = summary["num_microbial_map_host"]/microbial_total*100
+
+    if microbial_total > 0:
+        summary["prop_microbial_unmapped"] = summary["num_microbial_unmapped"]/microbial_total*100
+        summary["prop_microbial_map_ebv"] = summary["num_microbial_map_ebv"]/microbial_total*100
+        summary["prop_microbial_map_host"] = summary["num_microbial_map_host"]/microbial_total*100
+    else:
+        summary["prop_microbial_unmapped"] = 0
+        summary["prop_microbial_map_ebv"] = 0
+        summary["prop_microbial_map_host"] = 0
 
     #5. For reads which classify as microbial but map to host, what is the (mean, median, max) length, quality, confidence, prop_unique_microbial, prop_unique_host, prop_microbial prop_host, num_hits_microbial, num_hits_host
     for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', 'compression', 'mapped_prop']:
