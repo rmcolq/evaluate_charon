@@ -130,7 +130,7 @@ workflow evaluate_charon {
     //report_ch = Channel.from([[unique_id, report]])
 
     db = file(params.db, type: "file", checkIfExists:true)
-    refs = file("$projectDir/resources/T2T_ref_plus_EBV.fa.gz", type: "file", checkIfExists:true)
+    refs = file("$projectDir/${params.refs}", type: "file", checkIfExists:true)
 
     run_charon_microbial(fastq_ch, db)
     minimap2_microbial(run_charon_microbial.out.fastq, refs)

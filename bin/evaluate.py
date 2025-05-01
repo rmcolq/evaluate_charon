@@ -142,7 +142,7 @@ def generate_summary(df):
         summary[f"min_{column}_microbial_map_host"] = microbial_host_df[column].min()
 
     #6. For reads which classify as microbial and do not classify as host or ebv , what is the (mean, median, max) length, quality, confidence, prop_unique_microbial, prop_unique_host, prop_microbial prop_host, num_hits_microbial, num_hits_host
-    df_microbial_microbial = df_microbial[df_microbial["mapped_length"].isna()]
+    df_microbial_microbial = microbial_unmapped_df
     for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', 'compression', 'mapped_prop']:
         summary[f"mean_{column}_microbial_map_microbial"] = df_microbial_microbial[column].mean()
         summary[f"median_{column}_microbial_map_microbial"] = df_microbial_microbial[column].median()
