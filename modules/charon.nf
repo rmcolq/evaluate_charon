@@ -2,7 +2,7 @@
 
 process run_charon_microbial {
 
-    label "process_medium"
+    label "process_high"
     container 'docker.io/rmcolq/charon:latest'
 
     input:
@@ -27,7 +27,7 @@ process run_charon_microbial {
 
 process run_charon_host {
 
-    label "process_medium"
+    label "process_high"
     container 'docker.io/rmcolq/charon:latest'
 
     input:
