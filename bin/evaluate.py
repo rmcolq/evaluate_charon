@@ -134,15 +134,19 @@ def generate_summary(df):
     summary["num_microbial_map_ebv"] = microbial_ebv_df.shape[0]
     microbial_host_df = df_microbial[~df_microbial["ref"].isin(ebv_accs + other_accs)]
     summary["num_microbial_map_host"] = microbial_host_df.shape[0]
+    microbial_host_strong_df = microbial_host_df[microbial_host_df["mapped_prop"]>0.8]
+    summary["num_microbial_map_host_strong"] = microbial_host_strong_df.shape[0]
 
     if microbial_total > 0:
         summary["prop_microbial_unmapped"] = summary["num_microbial_unmapped"]/microbial_total
         summary["prop_microbial_map_ebv"] = summary["num_microbial_map_ebv"]/microbial_total
         summary["prop_microbial_map_host"] = summary["num_microbial_map_host"]/microbial_total
+        summary["prop_microbial_map_host_strong"] = summary["num_microbial_map_host_strong"]/microbial_total
     else:
         summary["prop_microbial_unmapped"] = 0
         summary["prop_microbial_map_ebv"] = 0
         summary["prop_microbial_map_host"] = 0
+        summary["prop_microbial_map_host_strong"] = 0
 
     #6. For reads which classify as microbial but map to host, what is the (mean, median, max) length, quality, confidence, prop_unique_microbial, prop_unique_host, prop_microbial prop_host, num_hits_microbial, num_hits_host
     for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', 'compression', 'mapped_prop']:
@@ -150,6 +154,11 @@ def generate_summary(df):
         summary[f"median_{column}_microbial_map_host"] = microbial_host_df[column].median()
         summary[f"max_{column}_microbial_map_host"] = microbial_host_df[column].max()
         summary[f"min_{column}_microbial_map_host"] = microbial_host_df[column].min()
+    for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', 'compression', 'mapped_prop']:
+        summary[f"mean_{column}_microbial_map_host_strong"] = microbial_host_strong_df[column].mean()
+        summary[f"median_{column}_microbial_map_host_strong"] = microbial_host_strong_df[column].median()
+        summary[f"max_{column}_microbial_map_host_strong"] = microbial_host_strong_df[column].max()
+        summary[f"min_{column}_microbial_map_host_strong"] = microbial_host_strong_df[column].min()
 
     #7. For reads which classify as microbial and do not classify as host or ebv , what is the (mean, median, max) length, quality, confidence, prop_unique_microbial, prop_unique_host, prop_microbial prop_host, num_hits_microbial, num_hits_host
     df_microbial_microbial = microbial_unmapped_df
