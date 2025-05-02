@@ -10,6 +10,9 @@ import numpy as np
 from simplesam import Reader
 import gzip
 
+ebv_accs = ["NC_007605.1","NC_009334.1"]
+other_accs = ["KC670213.1","XR_003525368.1","XR_003525370.1","KC670203.1"]
+
 def get_gc_ratio(inputStr):
     compression_ratio = len(inputStr.replace("A","").replace("T",""))/len(inputStr)
     return compression_ratio
@@ -101,9 +104,9 @@ def generate_summary(df):
     host_unmapped_df = df_host[df_host["unmapped"] == True]
     summary["num_host_unmapped"] = host_unmapped_df.shape[0]
     df_host = df_host[df_host["unmapped"] == False]
-    host_ebv_df = df_host[df_host["ref"].isin(["NC_007605.1","NC_009334.1"])]
+    host_ebv_df = df_host[df_host["ref"].isin(ebv_accs)]
     summary["num_host_map_ebv"] = host_ebv_df.shape[0]
-    host_host_df = df_host[~df_host["ref"].isin(["NC_007605.1","NC_009334.1"])]
+    host_host_df = df_host[~df_host["ref"].isin(ebv_accs + other_accs)]
     summary["num_host_map_host"] = host_host_df.shape[0]
     if host_total > 0:
         summary["prop_host_unmapped"] = summary["num_host_unmapped"]/host_total
@@ -127,9 +130,9 @@ def generate_summary(df):
     microbial_unmapped_df = df_microbial[df_microbial["unmapped"] == True]
     summary["num_microbial_unmapped"] = microbial_unmapped_df.shape[0]
     df_microbial = df_microbial[df_microbial["unmapped"] == False]
-    microbial_ebv_df = df_microbial[df_microbial["ref"].isin(["NC_007605.1","NC_009334.1"])]
+    microbial_ebv_df = df_microbial[df_microbial["ref"].isin(ebv_accs)]
     summary["num_microbial_map_ebv"] = microbial_ebv_df.shape[0]
-    microbial_host_df = df_microbial[~df_microbial["ref"].isin(["NC_007605.1","NC_009334.1"])]
+    microbial_host_df = df_microbial[~df_microbial["ref"].isin(ebv_accs + other_accs)]
     summary["num_microbial_map_host"] = microbial_host_df.shape[0]
 
     if microbial_total > 0:
