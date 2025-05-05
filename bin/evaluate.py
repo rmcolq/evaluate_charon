@@ -168,7 +168,7 @@ def generate_summary(df):
         summary[f"max_{column}_microbial_map_microbial"] = df_microbial_microbial[column].max()
         summary[f"min_{column}_microbial_map_microbial"] = df_microbial_microbial[column].min()
 
-    return summary, microbial_host_df
+    return summary, microbial_host_df, host_unmapped_df
 
 # Main method
 def main():
@@ -221,9 +221,11 @@ def main():
         charon_df = pd.read_csv(full_file, index_col=None)
         charon_df['classification'] = charon_df['classification'].fillna("")
 
-    summary,microbial_host_df = generate_summary(charon_df)
-    data_file = Path(args.prefix + "_data.csv")
+    summary,microbial_host_df, host_unmapped_df = generate_summary(charon_df)
+    data_file = Path(args.prefix + "_microbial_data.csv")
     microbial_host_df.to_csv(data_file, index=False)
+    data_file = Path(args.prefix + "_host_data.csv")
+    host_unmapped_df.to_csv(data_file, index=False)
 
     # Save to CSV
     fieldnames = ["file"] + list(summary.keys())

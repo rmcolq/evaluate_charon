@@ -1,52 +1,28 @@
 #!/usr/bin/env nextflow
 
-process run_charon_microbial {
+process run_charon {
 
     label "process_medium_plus_mem"
-    container 'docker.io/rmcolq/charon:latest'
+    container 'docker.io/rmcolq/charon:v1.0.4'
 
     input:
     tuple val(unique_id), path(fastq)
     path(db)
 
     output:
-    tuple val(unique_id), path("charon_${unique_id}_microbial.fq.gz"), emit: fastq
-    tuple val(unique_id), path("charon_${unique_id}_microbial.out"),  emit: result
+    tuple val(unique_id), path("charon_${unique_id}_microbial.fq.gz"), emit: microbial_fastq
+    tuple val(unique_id), path("charon_${unique_id}_human.fq.gz"), emit: human_fastq
+    tuple val(unique_id), path("charon_${unique_id}.out"),  emit: result
 
     script:
     """
     charon dehost ${fastq} \
       --db ${db} \
       --log charon_${unique_id}_microbial.log \
-      --extract microbial \
-      --extract_file charon_${unique_id}_microbial.fq.gz \
+      --extract all \
+      --prefix charon_${unique_id} \
       -t ${task.cpus} \
-      --min_length 20 > charon_${unique_id}_microbial.out
-    """
-}
-
-process run_charon_host {
-
-    label "process_medium_plus_mem"
-    container 'docker.io/rmcolq/charon:latest'
-
-    input:
-    tuple val(unique_id), path(fastq)
-    path(db)
-
-    output:
-    tuple val(unique_id), path("charon_${unique_id}_host.fq.gz"), emit: fastq
-    tuple val(unique_id), path("charon_${unique_id}_host.out"),  emit: result
-
-    script:
-    """
-    charon dehost ${fastq} \
-      --db ${db} \
-      --log charon_${unique_id}_host.log \
-      --extract human \
-      --extract_file charon_${unique_id}_host.fq.gz \
-      -t ${task.cpus} \
-      --min_length 20 > charon_${unique_id}_host.out
+      --min_length 20 > charon_${unique_id}.out
     """
 }
 
@@ -107,7 +83,7 @@ process evaluate_summary {
 
     output:
     path "${unique_id}_summary.csv", emit: summary
-    path "${unique_id}_data.csv", emit: data
+    path "${unique_id}*_data.csv", emit: data
 
     publishDir "${params.outdir}/", mode: 'copy'
 
@@ -125,20 +101,16 @@ process evaluate_summary {
 workflow evaluate_charon {
     unique_id = "${params.unique_id}"
     fastq = file(params.fastq, type: "file", checkIfExists:true)
-    //report = file(params.charon_report, type: "file", checkIfExists:true)
     fastq_ch = Channel.from([[unique_id, fastq]])
-    //report_ch = Channel.from([[unique_id, report]])
 
     db = file(params.db, type: "file", checkIfExists:true)
     refs = file("$projectDir/${params.refs}", type: "file", checkIfExists:true)
 
-    run_charon_microbial(fastq_ch, db)
-    minimap2_microbial(run_charon_microbial.out.fastq, refs)
+    run_charon(fastq_ch, db)
+    minimap2_microbial(run_charon.out.microbial_fastq, refs)
+    minimap2_host(run_charon.out.human_fastq, refs)
 
-    run_charon_host(fastq_ch, db)
-    minimap2_host(run_charon_host.out.fastq, refs)
-
-    run_charon_microbial.out.result
+    run_charon.out.result
              .combine(minimap2_host.out, by: 0)
              .combine(minimap2_microbial.out, by: 0)
              .set{ eval_ch }
