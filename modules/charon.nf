@@ -99,9 +99,11 @@ process evaluate_summary {
 
 
 workflow evaluate_charon {
-    unique_id = "${params.unique_id}"
-    fastq = file(params.fastq, type: "file", checkIfExists:true)
-    fastq_ch = Channel.from([[unique_id, fastq]])
+    take:
+        fastq_ch
+    main:
+
+
 
     db = file(params.db, type: "file", checkIfExists:true)
     refs = file("$projectDir/${params.refs}", type: "file", checkIfExists:true)
