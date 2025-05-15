@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 from simplesam import Reader
 import gzip
+import math
 
 ebv_accs = ["NC_007605.1","NC_009334.1"]
 other_accs = ["KC670213.1","XR_003525368.1","XR_003525370.1","KC670203.1"]
@@ -16,6 +17,18 @@ other_accs = ["KC670213.1","XR_003525368.1","XR_003525370.1","KC670203.1"]
 def get_gc_ratio(inputStr):
     compression_ratio = len(inputStr.replace("A","").replace("T",""))/len(inputStr)
     return compression_ratio
+
+def get_kmer_ratio(inputStr, k):
+    kmers = set()
+    max_size = math.pow(4,k)
+    if len(inputStr) < k:
+        return 0
+    for i in range(len(inputStr) - k):
+        kmers.add(inputStr[i:i+k])
+        if i%max_size == 0:
+            if len(kmers) == max_size:
+                break
+    return len(kmers)/max_size
 
 def load_map_info_from_sam(sam):
     sys.stderr.write("LOAD MAP INFO FROM: " + sam + "\n")
@@ -30,7 +43,8 @@ def load_map_info_from_sam(sam):
         entry={"read_id": read_id, "ref": ref, "pos":pos, "mapped_length":int(mapped_length), "mismatches": int(mismatches), "identity": 1-(float(mismatches)/float(mapped_length)), "divergence":float(divergence)}
         entry["seq_length"] = len(x.seq)
         entry["gc_ratio"] = get_gc_ratio(x.seq)
-        for motif in ["A","C","G","T", "CT","AT","CG", "AG"]:
+        entry["5mer_ratio"] = get_kmer_ratio(x.seq, 5)
+        for motif in ["A","C","G","T"]:
             entry[motif] = x.gapped('seq').count(motif)
         entry["mapped_prop"] = entry["mapped_length"] / entry["seq_length"]
         map_details.append(entry)
@@ -57,7 +71,10 @@ def load_charon_output(path):
     entries = []
     for  i, row in df.iterrows():
         entry = {"status":row[0], "read_id":row[1], "classification": row[2], "length": row[3], "num_hashes":row[4],   "mean_quality": row[5], "confidence": row[6], "compression":row[7]}
-        details = row[8].split(" ")
+        try:
+            details = row[8].split(" ")
+        except:
+            print(row)
         for part in details:
             try:
                 category, num_hits, prop_hits, prop_unique_hits, prob = part.split(":")
@@ -70,6 +87,10 @@ def load_charon_output(path):
         entries.append(entry)
     df =  pd.DataFrame(entries)
     df['classification'] = df['classification'].fillna("")
+    for column in ["mean_quality", "length", "compression"]:
+        m = df[column].mean()
+        sd = df[column].std()
+        df[f"{column}_num_stds"] = (df["column"]-m)/s
     return df
 
 def generate_summary(df):
@@ -118,7 +139,7 @@ def generate_summary(df):
         summary["prop_host_map_host"] = 0
 
     #4. For reads which classify as host and map to host, what is the (mean, median, max) length, quality, confidence, prop_unique_microbial, prop_unique_host, prop_microbial prop_host, num_hits_microbial, num_hits_host
-    for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', 'compression', 'mapped_prop']:
+    for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', '5mer_ratio', 'compression', 'mapped_prop']:
         summary[f"mean_{column}_host_map_host"] = host_host_df[column].mean()
         summary[f"median_{column}_host_map_host"] = host_host_df[column].median()
         summary[f"max_{column}_host_map_host"] = host_host_df[column].max()
@@ -149,12 +170,12 @@ def generate_summary(df):
         summary["prop_microbial_map_host_strong"] = 0
 
     #6. For reads which classify as microbial but map to host, what is the (mean, median, max) length, quality, confidence, prop_unique_microbial, prop_unique_host, prop_microbial prop_host, num_hits_microbial, num_hits_host
-    for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', 'compression', 'mapped_prop']:
+    for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', '5mer_ratio', 'compression', 'mapped_prop']:
         summary[f"mean_{column}_microbial_map_host"] = microbial_host_df[column].mean()
         summary[f"median_{column}_microbial_map_host"] = microbial_host_df[column].median()
         summary[f"max_{column}_microbial_map_host"] = microbial_host_df[column].max()
         summary[f"min_{column}_microbial_map_host"] = microbial_host_df[column].min()
-    for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', 'compression', 'mapped_prop']:
+    for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', '5mer_ratio', 'compression', 'mapped_prop']:
         summary[f"mean_{column}_microbial_map_host_strong"] = microbial_host_strong_df[column].mean()
         summary[f"median_{column}_microbial_map_host_strong"] = microbial_host_strong_df[column].median()
         summary[f"max_{column}_microbial_map_host_strong"] = microbial_host_strong_df[column].max()
@@ -162,7 +183,7 @@ def generate_summary(df):
 
     #7. For reads which classify as microbial and do not classify as host or ebv , what is the (mean, median, max) length, quality, confidence, prop_unique_microbial, prop_unique_host, prop_microbial prop_host, num_hits_microbial, num_hits_host
     df_microbial_microbial = microbial_unmapped_df
-    for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', 'compression', 'mapped_prop']:
+    for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', '5mer_ratio', 'compression', 'mapped_prop']:
         summary[f"mean_{column}_microbial_map_microbial"] = df_microbial_microbial[column].mean()
         summary[f"median_{column}_microbial_map_microbial"] = df_microbial_microbial[column].median()
         summary[f"max_{column}_microbial_map_microbial"] = df_microbial_microbial[column].max()

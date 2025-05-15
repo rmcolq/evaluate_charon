@@ -18,7 +18,7 @@ process run_charon {
     """
     charon dehost ${fastq} \
       --db ${db} \
-      --log charon_${unique_id}_microbial.log \
+      --log charon_${unique_id}.log \
       --extract all \
       --prefix charon_${unique_id} \
       -t ${task.cpus} \
