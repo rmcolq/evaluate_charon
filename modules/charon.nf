@@ -77,6 +77,7 @@ process minimap2_host {
 process evaluate_summary {
 
     container 'community.wave.seqera.io/library/simplesam_numpy_pandas:ea9b7172ad7bff36'
+    publishDir "${params.outdir}/", mode: 'copy'
 
     input:
     tuple val(unique_id), path(charon_report), path(host_sam), path(microbial_sam)
@@ -84,8 +85,6 @@ process evaluate_summary {
     output:
     path "${unique_id}_summary.csv", emit: summary
     path "${unique_id}*_data.csv", emit: data
-
-    publishDir "${params.outdir}/", mode: 'copy'
 
     script:
     """
