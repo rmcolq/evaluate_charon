@@ -39,15 +39,22 @@ process minimap2_microbial {
     output:
         tuple val(unique_id), path("microbial.mmp.sam")
     script:
-        preset = ""
-        if ( params.read_type == "illumina") {
-            preset = "sr"
+        if ( ! params.evaluate_microbial ) {
+            """
+            touch "microbial.mmp.sam"
+            """
         } else {
-            preset = "map-ont"
+            preset = ""
+            if ( params.read_type == "illumina") {
+                preset = "sr"
+            } else {
+                preset = "map-ont"
+            }
+            """
+            minimap2 -ax ${preset} ${refs} ${fastq} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > microbial.mmp.sam
+            """
         }
-        """
-        minimap2 -ax ${preset} ${refs} ${fastq} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > microbial.mmp.sam
-        """
+        
 }
 
 process minimap2_host {
@@ -63,15 +70,47 @@ process minimap2_host {
     output:
         tuple val(unique_id), path("host.mmp.sam")
     script:
-        preset = ""
-        if ( params.read_type == "illumina") {
-            preset = "sr"
+        if ( ! params.evaluate_host ) {
+            """
+            touch "host.mmp.sam"
+            """
         } else {
-            preset = "map-ont"
+            preset = ""
+            if ( params.read_type == "illumina") {
+                preset = "sr"
+            } else {
+                preset = "map-ont"
+            }
+            """
+            minimap2 -ax ${preset} ${refs} ${fastq} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > host.mmp.sam
+            """
         }
-        """
-        minimap2 -ax ${preset} ${refs} ${fastq} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > host.mmp.sam
-        """
+}
+
+process extract_microbial_host_hits {
+    input:
+    tuple val(unique_id), path(sam_file)
+
+    output:
+    tuple val(unique_id), path("query.fasta")
+
+    script:
+    """
+    samtools fasta ${sam_file} > "query.fasta"
+    """
+}
+
+process blastn_microbial_host_hits {
+    input:
+    tuple val(unique_id), path(fasta_file)
+
+    output:
+    tuple val(unique_id), path("results_blastn.txt")
+
+    script:
+    """
+    blastn -query ${fasta_file} -remote -db nt -out results_blastn.txt -evalue 1e-6 -outfmt 6
+    """
 }
 
 process evaluate_summary {
