@@ -128,14 +128,14 @@ process blastn_microbial_host_hits {
       -out results_blastn.txt \
       -evalue 1e-6 \
       -perc_identity 90 \
-      -outfmt "6 qseqid sacc sscinames staxids evalue pident length"
+      -outfmt "6 qseqid sacc sscinames staxids sstart send evalue pident length"
     """
 }
 
 process evaluate_summary {
 
     container 'community.wave.seqera.io/library/simplesam_numpy_pandas:ea9b7172ad7bff36'
-    publishDir "${params.outdir}/", mode: 'copy'
+    publishDir "${params.outdir}/${unique_id}/", mode: 'copy'
 
     input:
     tuple val(unique_id), path(charon_report), path(host_sam), path(microbial_sam), path(blast_result)
@@ -143,6 +143,8 @@ process evaluate_summary {
     output:
     path "${unique_id}_summary.csv", emit: summary
     path "${unique_id}*_data.csv", emit: data
+    path "${unique_id}*_taxa.csv", emit: taxa, optional:true
+    path "${unique_id}*_accs.csv", emit: accs, optional:true
 
     script:
     """

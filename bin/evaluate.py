@@ -66,13 +66,13 @@ def load_blast_info(blast_results):
         details = defaultdict(lambda:default_.copy())
         with open(blast_results, 'r') as f:
             for line in f:
-                qseqid,sacc,sscinames,staxids,evalue,pident,length = line.strip().split()
+                qseqid,sacc,sscinames,staxids,sstart send,evalue,pident,length = line.strip().split()
                 details[qseqid]["taxids"].append(staxids)
                 details[qseqid]["names"].append(sscinames)
                 details[qseqid]["read_id"] = qseqid
                 if staxids == "9606":
                     details[qseqid]["human"] = True
-                    details[qseqid]["human_accs"].append(sacc)
+                    details[qseqid]["human_accs"].append(f"{sacc}:{sstart}-{send}")
                     details[qseqid]["pident"] = max(details[qseqid]["pident"], pident)
         for taxid in details:
             details[taxid]["taxids"] = ";".join(list(set(details[qseqid]["taxids"])))
@@ -310,8 +310,14 @@ def main():
 
     summary,microbial_host_df, host_unmapped_df, related_taxa, human_accs = generate_summary(charon_df)
     if len(related_taxa) > 0:
+        taxa_file = Path(args.prefix + "_related_taxa.csv")
+        with open(taxa_file, "r") as f:
+            f.write(",".join(related_taxa))
         sys.stderr.write(f"Found microbial taxon ids which are closely related to human:\n{related_taxa}\n")
     if len(human_accs) > 0:
+        accs_file = Path(args.prefix + "_human_accs.csv")
+        with open(accs_file, "r") as f:
+            f.write(",".join(human_accs))
         sys.stderr.write(f"Found human accessions which are classified as microbial:\n{human_accs}\n")
     data_file = Path(args.prefix + "_microbial_data.csv")
     microbial_host_df.to_csv(data_file, index=False)
