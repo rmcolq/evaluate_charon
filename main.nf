@@ -1,5 +1,5 @@
 include { evaluate_charon } from './modules/charon'
-
+include { bam_to_fastq } from './modules/charon'
 
 
 workflow {
