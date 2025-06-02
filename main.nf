@@ -13,12 +13,13 @@ workflow {
         exit 1, "I don't support paired end reads yet"
     }
 
-    if (params.fastq_csv){
-        Channel.fromPath("${params.fastq_csv}")
+    if (params.bam_csv){
+        Channel.fromPath("${params.bam_csv}")
             .splitCsv( header: true )
             .map{ row -> [row.sample_id,file(row.filepath, type: "file", checkIfExists:true)]}
-            .set{ fastq_ch }
-        evaluate_charon(fastq_ch)
+            .set{ bam_ch }
+        bam_to_fastq(bam_ch)
+        evaluate_charon(bam_to_fastq.out)
     } else if (params.fastq_dir){
         fastq_ch = Channel.fromPath("${params.fastq_dir}/*.f*q*", type: "file", checkIfExists: true).map { [it.baseName.replace(".fq","").replace(".fastq",""), it] }
         fastq_ch.view()

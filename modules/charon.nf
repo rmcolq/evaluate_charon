@@ -1,5 +1,21 @@
 #!/usr/bin/env nextflow
 
+process bam_to_fastq {
+    label "process_medium"
+    conda "bioconda::samtools=1.21"
+    container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
+
+    input:
+    tuple val(unique_id), path(bam)
+
+    output:
+    tuple val(unique_id), path("${bam.baseName}.fastq")
+
+    script:
+    """
+    samtools fastq ${bam} > "${bam.baseName}.fastq"
+    """
+}
 process run_charon {
 
     label "process_medium_plus_mem"
