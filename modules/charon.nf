@@ -145,12 +145,16 @@ process blastn_microbial_host_hits {
         db = "nt -remote"
     }
     """
-    blastn -query ${fasta_file} \
-      -db ${db} \
-      -out results_blastn.txt \
-      -evalue 1e-6 \
-      -perc_identity 90 \
-      -outfmt "6 qseqid sacc sscinames staxids sstart send evalue pident length"
+    if [ -s ${fasta_file} ]; then
+      blastn -query ${fasta_file} \
+        -db ${db} \
+        -out results_blastn.txt \
+        -evalue 1e-6 \
+        -perc_identity 90 \
+        -outfmt "6 qseqid sacc sscinames staxids sstart send evalue pident length"
+    else
+      touch "results_blastn.txt"
+    fi
     """
 }
 
@@ -197,7 +201,7 @@ workflow evaluate_charon {
         ref_bed = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true)
         extract_microbial_host_hits(minimap2_microbial.out, ref_bed)
         if (params.blast_db)
-            blast_db = file(params.db, type: "file", checkIfExists:true)
+            blast_db = file(params.blast_db, type: "dir", checkIfExists:true)
         else
             blast_db = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true) // any file will do to not block
         blastn_microbial_host_hits(extract_microbial_host_hits.out, blast_db)
