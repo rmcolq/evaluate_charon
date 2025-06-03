@@ -133,14 +133,20 @@ process blastn_microbial_host_hits {
 
     input:
     tuple val(unique_id), path(fasta_file)
+    path(blast_db)
 
     output:
     tuple val(unique_id), path("results_blastn.txt")
 
     script:
+    if (params.blast_db){
+        db = "${blast_db} -num_threads 4"
+    } else {
+        db = "nt -remote"
+    }
     """
     blastn -query ${fasta_file} \
-      -db ${params.blast_db} \
+      -db ${db} \
       -out results_blastn.txt \
       -evalue 1e-6 \
       -perc_identity 90 \
@@ -190,7 +196,11 @@ workflow evaluate_charon {
         blast_ch = Channel.empty()
         ref_bed = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true)
         extract_microbial_host_hits(minimap2_microbial.out, ref_bed)
-        blastn_microbial_host_hits(extract_microbial_host_hits.out)
+        if (params.blast_db)
+            blast_db = file(params.db, type: "file", checkIfExists:true)
+        else
+            blast_db = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true) // any file will do to not block
+        blastn_microbial_host_hits(extract_microbial_host_hits.out, blast_db)
         blastn_microbial_host_hits.out.set{ blast_ch }
     } else {
         blast_ch = Channel.empty()
