@@ -26,8 +26,8 @@ process run_charon {
     path(db)
 
     output:
-    tuple val(unique_id), path("charon_${unique_id}_microbial.fq.gz"), emit: microbial_fastq
-    tuple val(unique_id), path("charon_${unique_id}_human.fq.gz"), emit: human_fastq
+    tuple val(unique_id), path("charon_${unique_id}_microbial.f*q.gz"), emit: microbial_fastq
+    tuple val(unique_id), path("charon_${unique_id}_human.f*q.gz"), emit: human_fastq
     tuple val(unique_id), path("charon_${unique_id}.out"),  emit: result
 
     script:
