@@ -325,9 +325,9 @@ def main():
                             species_ids.append(s.tax_id)
                             species_names.append(s.scientific_name)
             species_ids = [str(id) for id in species_ids]
-            f.write(",".join(related_taxa))
-            f.write(",".join(species_ids))
-            f.write(",".join(species_names))
+            f.write(f"{','.join(related_taxa)}\n")
+            f.write(f"{','.join(species_ids)}\n")
+            f.write(f"{','.join(species_names)}\n")
         sys.stderr.write(f"Found microbial taxa which are closely related to human:\n{species_names}\n")
     if len(human_accs) > 0:
         accs_file = Path(args.prefix + "_human_accs.csv")
