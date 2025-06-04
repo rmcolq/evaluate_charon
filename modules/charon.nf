@@ -140,7 +140,7 @@ process blastn_microbial_host_hits {
 
     script:
     if (params.blast_db){
-        db = "${blast_db} -num_threads 4"
+        db = "${blast_db}/nt -num_threads 4"
     } else {
         db = "nt -remote"
     }
