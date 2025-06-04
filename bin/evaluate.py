@@ -11,6 +11,7 @@ from simplesam import Reader
 import gzip
 import math
 from collections import defaultdict
+import taxoniq
 
 ebv_accs = ["NC_007605.1","NC_009334.1"]
 other_accs = ["KC670213.1","XR_003525368.1","XR_003525370.1","KC670203.1"]
@@ -314,8 +315,19 @@ def main():
     if len(related_taxa) > 0:
         taxa_file = Path(args.prefix + "_related_taxa.csv")
         with open(taxa_file, "w") as f:
+            species_ids = []
+            species_names = []
+            for taxid in related_taxa:
+                t = taxoniq.Taxon(taxid)
+                for s in t.ranked_lineage:
+                    if s.rank.name == "species":
+                        if s.tax_id not in species_ids:
+                            species_ids.append(s.tax_id)
+                            species_names.append(s.scientific_name)
             f.write(",".join(related_taxa))
-        sys.stderr.write(f"Found microbial taxon ids which are closely related to human:\n{related_taxa}\n")
+            f.write(",".join(species_ids))
+            f.write(",".join(species_names))
+        sys.stderr.write(f"Found microbial taxa which are closely related to human:\n{species_names}\n")
     if len(human_accs) > 0:
         accs_file = Path(args.prefix + "_human_accs.csv")
         with open(accs_file, "w") as f:
