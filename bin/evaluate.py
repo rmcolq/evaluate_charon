@@ -318,7 +318,7 @@ def main():
             species_ids = []
             species_names = []
             for taxid in related_taxa:
-                t = taxoniq.Taxon(taxid)
+                t = taxoniq.Taxon(int(taxid))
                 for s in t.ranked_lineage:
                     if s.rank.name == "species":
                         if s.tax_id not in species_ids:
