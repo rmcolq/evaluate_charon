@@ -324,6 +324,7 @@ def main():
                         if s.tax_id not in species_ids:
                             species_ids.append(s.tax_id)
                             species_names.append(s.scientific_name)
+            species_ids = [str(id) for id in species_ids]
             f.write(",".join(related_taxa))
             f.write(",".join(species_ids))
             f.write(",".join(species_names))
