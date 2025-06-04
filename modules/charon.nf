@@ -160,7 +160,7 @@ process blastn_microbial_host_hits {
 
 process evaluate_summary {
 
-    container 'community.wave.seqera.io/library/simplesam_numpy_pandas:ea9b7172ad7bff36'
+    container 'community.wave.seqera.io/library/simplesam_numpy_pandas_pip_taxoniq:3af1649bdaf86fca'
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy'
 
     input:
