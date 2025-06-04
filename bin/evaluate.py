@@ -313,12 +313,12 @@ def main():
     summary,microbial_host_df, host_unmapped_df, related_taxa, human_accs = generate_summary(charon_df)
     if len(related_taxa) > 0:
         taxa_file = Path(args.prefix + "_related_taxa.csv")
-        with open(taxa_file, "r") as f:
+        with open(taxa_file, "w") as f:
             f.write(",".join(related_taxa))
         sys.stderr.write(f"Found microbial taxon ids which are closely related to human:\n{related_taxa}\n")
     if len(human_accs) > 0:
         accs_file = Path(args.prefix + "_human_accs.csv")
-        with open(accs_file, "r") as f:
+        with open(accs_file, "w") as f:
             f.write(",".join(human_accs))
         sys.stderr.write(f"Found human accessions which are classified as microbial:\n{human_accs}\n")
     data_file = Path(args.prefix + "_microbial_data.csv")
