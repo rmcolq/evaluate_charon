@@ -168,6 +168,7 @@ process evaluate_summary {
 
     output:
     path "${unique_id}_summary.csv", emit: summary
+    path "${unique_id}_full.csv", emit: full
     path "${unique_id}*_data.csv", emit: data
     path "${unique_id}*_taxa.csv", emit: taxa, optional:true
     path "${unique_id}*_accs.csv", emit: accs, optional:true
