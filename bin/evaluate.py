@@ -66,7 +66,9 @@ def load_blast_info(blast_results):
         details = defaultdict(lambda:default_.copy())
         with open(blast_results, 'r') as f:
             for line in f:
-                qseqid,sacc,sscinames,staxids,sstart send,evalue,pident,length = line.strip().split()
+                if len(line.strip())==0:
+                    continue
+                qseqid,sacc,sscinames,staxids,sstart,send,evalue,pident,length = line.strip().split()
                 details[qseqid]["taxids"].append(staxids)
                 details[qseqid]["names"].append(sscinames)
                 details[qseqid]["read_id"] = qseqid
@@ -80,7 +82,7 @@ def load_blast_info(blast_results):
             details[taxid]["human_accs"] = ";".join(list(set(details[qseqid]["human_accs"])))
         df = pd.DataFrame(details.values())
     else:
-        columns = ["read_id", "taxids", "names", "human", "pident"]
+        columns = ["read_id", "taxids", "names", "human_accs", "human", "pident"]
         df = pd.DataFrame(columns=columns)
     df.set_index("read_id")
     sys.stderr.write("Found " + str(df.shape)  + " entries\n")
