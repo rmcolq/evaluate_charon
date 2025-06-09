@@ -76,7 +76,7 @@ def load_blast_info(blast_results):
                 if staxids == "9606":
                     details[qseqid]["human"] = True
                     details[qseqid]["human_accs"].append(f"{sacc}:{sstart}-{send}")
-                    details[qseqid]["pident"] = max(details[qseqid]["pident"], pident)
+                    details[qseqid]["pident"] = max(details[qseqid]["pident"], float(pident))
         for taxid in details:
             details[taxid]["taxids"] = ";".join(list(set(details[qseqid]["taxids"])))
             details[taxid]["names"] = ";".join(list(set(details[qseqid]["names"])))
@@ -294,16 +294,20 @@ def main():
     full_file = Path(args.prefix + "_full.csv")
     if not full_file.is_file():
         mapped_df = load_both_sam(args.host_sam, args.microbial_sam)
+        mapped_df.to_csv("mapped_df.csv")
+
+        blast_df = load_blast_info(args.blast_result)
+        blast_df.to_csv("blast_df.csv")
+
+        combined_df = mapped_df.merge(blast_df, how="left")
+        combined_df.to_csv("combined_df.csv")
+
         charon_df = load_charon_output(args.input)
 
         sys.stderr.write("COMBINE CHARON AND MAPPING DATA\n")
         charon_df.set_index("read_id")
-        charon_df = charon_df.merge(mapped_df, how="left")
+        charon_df = charon_df.merge(combined_df, how="left")
         charon_df["unmapped"] = charon_df["mapped_length"].isna()
-
-        blast_df = load_blast_info(args.blast_result)
-        blast_df.to_csv("blast_df.csv")
-        charon_df = charon_df.merge(blast_df, how="left")
 
         charon_df["file"] = args.input
         charon_df.to_csv(full_file, index=False)
