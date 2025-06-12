@@ -34,6 +34,7 @@ process run_charon {
     """
     charon dehost ${fastq} \
       --db ${db} \
+      --confidence 5 \
       --log charon_${unique_id}.log \
       --extract all \
       --prefix charon_${unique_id} \
@@ -94,7 +95,8 @@ process minimap2_host {
                 preset = "map-ont"
             }
             """
-            minimap2 -ax ${preset} ${refs} ${fastq} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > host.mmp.sam
+            head -n1000000 ${fastq} > small.fq
+            minimap2 -ax ${preset} ${refs} small.fq --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > host.mmp.sam
             """
         } else {
             """
@@ -127,7 +129,7 @@ process extract_microbial_host_hits {
 
 process blastn_microbial_host_hits {
 
-    label "process_medium"
+    label "process_medium_plus_mem"
     conda "bioconda::blast=2.16.0"
     container "ncbi/blast"
 
@@ -150,7 +152,7 @@ process blastn_microbial_host_hits {
         -db ${db} \
         -out results_blastn.txt \
         -evalue 1e-6 \
-        -perc_identity 90 \
+        -perc_identity 80 \
         -outfmt "6 qseqid sacc sscinames staxids sstart send evalue pident length"
     else
       touch "results_blastn.txt"
@@ -160,6 +162,7 @@ process blastn_microbial_host_hits {
 
 process evaluate_summary {
 
+    label "process_low"
     container 'community.wave.seqera.io/library/simplesam_numpy_pandas_pip_taxoniq:3af1649bdaf86fca'
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy'
 

@@ -12,6 +12,7 @@ import gzip
 import math
 from collections import defaultdict
 import taxoniq
+import copy
 
 ebv_accs = ["NC_007605.1","NC_009334.1"]
 other_accs = ["KC670213.1","XR_003525368.1","XR_003525370.1","KC670203.1"]
@@ -39,11 +40,11 @@ def load_map_info_from_sam(sam):
         in_file = open(sam, 'r')
         in_sam = Reader(in_file)
         for x in in_sam:
-            read_id, status, ref, pos, mapped_length = x.qname, x.flag, x.rname, x.pos, len(x)
+            read_id, status, ref, pos, ref_coords, mapped_length = x.qname, x.flag, x.rname, x.pos, x.coords, len(x)
             if status not in [0, 16]:
                 continue
             mismatches, divergence =  x.tags["NM"], x.tags["de"]
-            entry={"read_id": read_id, "ref": ref, "pos":pos, "mapped_length":int(mapped_length), "mismatches": int(mismatches), "identity": 1-(float(mismatches)/float(mapped_length)), "divergence":float(divergence)}
+            entry={"read_id": read_id, "ref": ref, "pos":pos, "ref_start":ref_coords[0], "ref_end":ref_coords[-1], "mapped_length":int(mapped_length), "mismatches": int(mismatches), "identity": 1-(float(mismatches)/float(mapped_length)), "divergence":float(divergence)}
             entry["seq_length"] = len(x.seq)
             entry["gc_ratio"] = get_gc_ratio(x.seq)
             entry["5mer_ratio"] = get_kmer_ratio(x.seq, 5)
@@ -55,7 +56,7 @@ def load_map_info_from_sam(sam):
                 sys.stderr.write("Processed " + str(len(map_details)) + "\n")
         df = pd.DataFrame(map_details)
     else:
-        columns = ["read_id","ref","pos","mapped_length","mismatches","identity","divergence","seq_length","gc_ratio","5mer_ratio","A","C","G","T","mapped_prop"]
+        columns = ["read_id","ref","pos","ref_start","ref_end","mapped_length","mismatches","identity","divergence","seq_length","gc_ratio","5mer_ratio","A","C","G","T","mapped_prop"]
         df = pd.DataFrame(columns=columns)
     sys.stderr.write("Found " + str(df.shape)  + " entries\n")
     return df
@@ -63,24 +64,29 @@ def load_map_info_from_sam(sam):
 def load_blast_info(blast_results):
     sys.stderr.write("LOAD BLAST INFO FROM: " + blast_results + "\n")
     if (os.path.getsize(blast_results) > 0):
-        default_ = {"read_id":None, "taxids":[], "names":[], "human_accs":[], "human":False, "pident":0}
-        details = defaultdict(lambda:default_.copy())
+        default_ = {"read_id":None, "taxids":[], "names":[], "human_accs":[], "human":False, "pident":0, "top_hit":None}
+        details = defaultdict(lambda:copy.deepcopy(default_))
         with open(blast_results, 'r') as f:
             for line in f:
                 if len(line.strip())==0:
                     continue
                 qseqid,sacc,sscinames,staxids,sstart,send,evalue,pident,length = line.strip().split()
-                details[qseqid]["taxids"].append(staxids)
-                details[qseqid]["names"].append(sscinames)
-                details[qseqid]["read_id"] = qseqid
-                if staxids == "9606":
-                    details[qseqid]["human"] = True
-                    details[qseqid]["human_accs"].append(f"{sacc}:{sstart}-{send}")
-                    details[qseqid]["pident"] = max(details[qseqid]["pident"], float(pident))
+                if details[qseqid]["top_hit"] is None:
+                    details[qseqid]["top_hit"] = staxids
+                if float(pident) < 90 and len(details[qseqid]["taxids"]) > 0:
+                    continue
+                if staxids not in details[qseqid]["taxids"]:
+                    details[qseqid]["taxids"].append(staxids)
+                    details[qseqid]["names"].append(sscinames)
+                    details[qseqid]["read_id"] = qseqid
+                    if staxids == "9606":
+                        details[qseqid]["human"] = True
+                        details[qseqid]["human_accs"].append(f"{sacc}:{sstart}-{send}")
+                        details[qseqid]["pident"] = float(pident)
         for taxid in details:
-            details[taxid]["taxids"] = ";".join(list(set(details[qseqid]["taxids"])))
-            details[taxid]["names"] = ";".join(list(set(details[qseqid]["names"])))
-            details[taxid]["human_accs"] = ";".join(list(set(details[qseqid]["human_accs"])))
+            details[taxid]["taxids"] = ";".join(list(set(details[taxid]["taxids"])))
+            details[taxid]["names"] = ";".join(list(set(details[taxid]["names"])))
+            details[taxid]["human_accs"] = ";".join(list(set(details[taxid]["human_accs"])))
         df = pd.DataFrame(details.values())
     else:
         columns = ["read_id", "taxids", "names", "human_accs", "human", "pident"]
@@ -246,7 +252,7 @@ def generate_summary(df):
     for i in microbial_host_verified_accs:
         human_accs.update(i.split(";"))
 
-    return summary, microbial_host_df, host_unmapped_df, related_taxa, human_accs
+    return summary, microbial_host_df, host_host_df, related_taxa, human_accs
 
 # Main method
 def main():
