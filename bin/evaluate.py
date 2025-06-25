@@ -34,6 +34,7 @@ def get_kmer_ratio(inputStr, k):
     return len(kmers)/max_size
 
 def load_map_info_from_sam(sam):
+    processed_read_ids = set()
     sys.stderr.write("LOAD MAP INFO FROM: " + sam + "\n")
     if (os.path.getsize(sam) > 0):
         map_details = []
@@ -43,6 +44,10 @@ def load_map_info_from_sam(sam):
             read_id, status, ref, pos, ref_coords, mapped_length = x.qname, x.flag, x.rname, x.pos, x.coords, len(x)
             if status not in [0, 16]:
                 continue
+            if read_id in processed_read_ids:
+                continue
+            else:
+                processed_read_ids.add(read_id)
             mismatches, divergence =  x.tags["NM"], x.tags["de"]
             entry={"read_id": read_id, "ref": ref, "pos":pos, "ref_start":ref_coords[0], "ref_end":ref_coords[-1], "mapped_length":int(mapped_length), "mismatches": int(mismatches), "identity": 1-(float(mismatches)/float(mapped_length)), "divergence":float(divergence)}
             entry["seq_length"] = len(x.seq)
@@ -62,6 +67,7 @@ def load_map_info_from_sam(sam):
     return df
 
 def load_blast_info(blast_results):
+    processed_ids = set()
     sys.stderr.write("LOAD BLAST INFO FROM: " + blast_results + "\n")
     if (os.path.getsize(blast_results) > 0):
         default_ = {"read_id":None, "taxids":[], "names":[], "human_accs":[], "human":False, "pident":0, "top_hit":None}
@@ -71,6 +77,12 @@ def load_blast_info(blast_results):
                 if len(line.strip())==0:
                     continue
                 qseqid,sacc,sscinames,staxids,sstart,send,evalue,pident,length = line.strip().split()
+
+                if f"{qseqid}_{staxids}" in processed_ids:
+                    continue
+                else:
+                    processed_ids.add(f"{qseqid}_{staxids}")
+
                 if details[qseqid]["top_hit"] is None:
                     details[qseqid]["top_hit"] = staxids
                 if float(pident) < 90 and len(details[qseqid]["taxids"]) > 0:
@@ -83,10 +95,10 @@ def load_blast_info(blast_results):
                         details[qseqid]["human"] = True
                         details[qseqid]["human_accs"].append(f"{sacc}:{sstart}-{send}")
                         details[qseqid]["pident"] = float(pident)
-        for taxid in details:
-            details[taxid]["taxids"] = ";".join(list(set(details[taxid]["taxids"])))
-            details[taxid]["names"] = ";".join(list(set(details[taxid]["names"])))
-            details[taxid]["human_accs"] = ";".join(list(set(details[taxid]["human_accs"])))
+        for qseqid in details:
+            details[qseqid]["taxids"] = ";".join(list(set(details[qseqid]["taxids"])))
+            details[qseqid]["names"] = ";".join(list(set(details[qseqid]["names"])))
+            details[qseqid]["human_accs"] = ";".join(list(set(details[qseqid]["human_accs"])))
         df = pd.DataFrame(details.values())
     else:
         columns = ["read_id", "taxids", "names", "human_accs", "human", "pident"]
@@ -132,6 +144,19 @@ def load_charon_output(path):
         m = df[column].mean()
         sd = df[column].std()
         df[f"{column}_num_stds"] = (df[column]-m)/sd
+    return df
+
+def load_tsv_output(path, classifier, df):
+    sys.stderr.write("LOAD TSV OUTPUT from " + path + "\n")
+    entries = []
+    with open(path, newline='', sep="\t") as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            entry = {"read_id":row["read_id"], classifier: row["classification"]}
+            entries.append(entry)
+    new_df =  pd.DataFrame(entries)
+    new_df.set_index("read_id")
+    df = df.merge(new_df, how="left")
     return df
 
 def generate_summary(df):
@@ -266,6 +291,12 @@ def main():
         help="TSV output by charon",
     )
     parser.add_argument(
+        "-a",
+        dest="additional",
+        required=False,
+        help="Additional TSV for another classifier",
+    )
+    parser.add_argument(
         "-p",
         dest="prefix",
         required=True,
@@ -309,6 +340,8 @@ def main():
         combined_df.to_csv("combined_df.csv")
 
         charon_df = load_charon_output(args.input)
+        if args.additional:
+            charon_df = load_tsv_output(args.additional, "deacon", charon_df)
 
         sys.stderr.write("COMBINE CHARON AND MAPPING DATA\n")
         charon_df.set_index("read_id")
