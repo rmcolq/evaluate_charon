@@ -28,8 +28,8 @@ process run_deacon {
 
     script:
     """
-    deacon filter ${deacon_index} ${fastq} -o "deacon_${unique_id}_microbial.fq.gz"
-    deacon filter -d ${deacon_index} ${fastq} -o "deacon_${unique_id}_human.fq.gz"
+    deacon filter ${deacon_index} ${fastq} -o "deacon_${unique_id}_human.fq.gz"
+    deacon filter -d ${deacon_index} ${fastq} -o "deacon_${unique_id}_microbial.fq.gz"
     """
 }
 
