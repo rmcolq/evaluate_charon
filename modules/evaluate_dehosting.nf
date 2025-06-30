@@ -47,17 +47,17 @@ workflow evaluate_dehosting {
                                      .set{ microbial_sam }
 
     evaluate_charon.out.blast.concat(evaluate_deacon.out.blast)
-                             .collectFile( keepHeader:true, skip:29, newLine:true)
+                             .collectFile(newLine:true)
                              .set{ blast }
 
-    /*evaluate_charon.out.report
+    evaluate_charon.out.report
                  .combine(host_sam, by: 0)
                  .combine(microbial_sam, by: 0)
                  .combine(blast, by: 0)
                  .combine(evaluate_deacon.out.report, by:0)
                  .set{ eval_ch }
 
-    evaluate_summary(eval_ch)*/
+    evaluate_summary(eval_ch)
 }
 
 

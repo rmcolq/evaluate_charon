@@ -159,125 +159,186 @@ def load_tsv_output(path, classifier, df):
     df = df.merge(new_df, how="left")
     return df
 
-def generate_summary(df):
-    sys.stderr.write("GENERATE SUMMARY\n")
-    summary = {}
-
-    #1. How many host, microbial, unclassified reads were there?
+def add_classified_counts_to_summary(df, summary, others=[]):
+    #1. How many host, microbial, unclassified reads were there for charon?
     g = df.groupby(["status","classification"]).count()
+
     if ("C","human") in g["read_id"].index:
-        summary["num_host"] = g["read_id"]["C"]["human"]
+        summary["num_host_charon"] = g["read_id"]["C"]["human"]
     else:
-        summary["num_host"] = 0
+        summary["num_host_charon"] = 0
+
     if ("C","microbial") in g["read_id"].index:
-        summary["num_microbial"] = g["read_id"]["C"]["microbial"]
+        summary["num_microbial_charon"] = g["read_id"]["C"]["microbial"]
     else:
-        summary["num_microbial"] = 0
+        summary["num_microbial_charon"] = 0
+
     if ("U","") in g["read_id"].index:
-        summary["num_unclassified"] = g["read_id"]["U"][""]
+        summary["num_unclassified_charon"] = g["read_id"]["U"][""]
     else:
-        summary["num_unclassified"] = 0
-    summary["total"] = summary["num_host"] + summary["num_microbial"] + summary["num_unclassified"]
-    summary["classified"] = summary["num_host"] + summary["num_microbial"]
+        summary["num_unclassified_charon"] = 0
+
+    summary["total"] = summary["num_host_charon"] + summary["num_microbial_charon"] + summary["num_unclassified_charon"]
+    summary["classified"] = summary["num_host_charon"] + summary["num_microbial_charon"]
 
     #2. Scale these to proportions
-    summary["prop_host"] = summary["num_host"]/summary["total"]
-    summary["prop_microbial"] = summary["num_microbial"]/summary["total"]
-    summary["prop_unclassified"] = summary["num_unclassified"]/summary["total"]
+    summary["prop_host_charon"] = summary["num_host_charon"]/summary["total"]
+    summary["prop_microbial_charon"] = summary["num_microbial_charon"]/summary["total"]
+    summary["prop_unclassified_charon"] = summary["num_unclassified_charon"]/summary["total"]
 
-    #3. Of the host reads, what proportion map back to the host reference genome, or EBV (minimap2 T2T+EBV)?
+    # Process OTHER classifiers
+    for classifier in others:
+        #3. How many host, microbial, unclassified reads were there?
+        g = df.groupby([classifier]).count()
+
+        if ("human") in g["read_id"].index:
+            summary[f"num_host_{classifier}"] = g["read_id"]["human"]
+        else:
+            summary[f"num_host_{classifier}"] = 0
+
+        if ("microbial") in g["read_id"].index:
+            summary[f"num_microbial_{classifier}"] = g["read_id"]["microbial"]
+        else:
+            summary[f"num_microbial_{classifier}"] = 0
+
+        #4. Scale these to proportions
+        assert summary["total"] == summary[f"num_host_{classifier}"] + summary[f"num_microbial_{classifier}"]
+        summary[f"prop_host_{classifier}"] = summary[f"num_host_{classifier}"]/summary["total"]
+        summary[f"prop_microbial_{classifier}"] = summary[f"num_microbial_{classifier}"]/summary["total"]
+
+    return summary
+
+def add_host_counts_to_summary(df, summary, classifier, prefix):
     df_host = df[df["classification"] == "human"]
+    if classifier != "charon":
+        df_host = df[df[classifier] == "human"]
     host_total = df_host.shape[0]
+
+    #5. Of the host reads, what proportion map back to the host reference genome, or EBV (minimap2 T2T+EBV)?
     host_unmapped_df = df_host[df_host["unmapped"] == True]
-    summary["num_host_unmapped"] = host_unmapped_df.shape[0]
+    summary[f"num_host_unmapped_{classifier}"] = host_unmapped_df.shape[0]
     df_host = df_host[df_host["unmapped"] == False]
+
     host_ebv_df = df_host[df_host["ref"].isin(ebv_accs)]
-    summary["num_host_map_ebv"] = host_ebv_df.shape[0]
+    summary[f"num_host_map_ebv_{classifier}"] = host_ebv_df.shape[0]
+
     host_host_df = df_host[~df_host["ref"].isin(ebv_accs + other_accs)]
-    summary["num_host_map_host"] = host_host_df.shape[0]
+    summary[f"num_host_map_host_{classifier}"] = host_host_df.shape[0]
+
     if host_total > 0:
-        summary["prop_host_unmapped"] = summary["num_host_unmapped"]/host_total
-        summary["prop_host_map_ebv"] = summary["num_host_map_ebv"]/host_total
-        summary["prop_host_map_host"] = summary["num_host_map_host"]/host_total
+        summary[f"prop_host_unmapped_{classifier}"] = summary[f"num_host_unmapped_{classifier}"]/host_total
+        summary[f"prop_host_map_ebv_{classifier}"] = summary[f"num_host_map_ebv_{classifier}"]/host_total
+        summary[f"prop_host_map_host_{classifier}"] = summary[f"num_host_map_host_{classifier}"]/host_total
     else:
-        summary["prop_host_unmapped"] = 0
-        summary["prop_host_map_ebv"] = 0
-        summary["prop_host_map_host"] = 0
+        summary[f"prop_host_unmapped_{classifier}"] = 0
+        summary[f"prop_host_map_ebv_{classifier}"] = 0
+        summary[f"prop_host_map_host_{classifier}"] = 0
 
-    #4. For reads which classify as host and map to host, what is the (mean, median, max) length, quality, confidence, prop_unique_microbial, prop_unique_host, prop_microbial prop_host, num_hits_microbial, num_hits_host
-    for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', '5mer_ratio', 'compression', 'mapped_prop']:
-        summary[f"mean_{column}_host_map_host"] = host_host_df[column].mean()
-        summary[f"median_{column}_host_map_host"] = host_host_df[column].median()
-        summary[f"max_{column}_host_map_host"] = host_host_df[column].max()
-        summary[f"min_{column}_host_map_host"] = host_host_df[column].min()
+    data_file = Path(f"{prefix}_{classifier}_host_data.csv")
+    host_host_df.to_csv(data_file, index=False)
+    return
 
-    #5. Of the microbial reads, what proportion map back to the host reference genome, or EBV?
-    df_microbial = df[df["classification"] == "microbial"]
+def add_microbial_counts_to_summary(df, summary, classifier, prefix):
+    df_microbial = df[df["classification"] == "human"]
+    if classifier != "charon":
+        df_microbial = df[df[classifier] == "microbial"]
     microbial_total = df_microbial.shape[0]
+
+    #6. Of the microbial reads, what proportion map back to the host reference genome, or EBV?
     microbial_unmapped_df = df_microbial[df_microbial["unmapped"] == True]
-    summary["num_microbial_unmapped"] = microbial_unmapped_df.shape[0]
+    summary[f"num_microbial_unmapped_{classifier}"] = microbial_unmapped_df.shape[0]
     df_microbial = df_microbial[df_microbial["unmapped"] == False]
+
     microbial_ebv_df = df_microbial[df_microbial["ref"].isin(ebv_accs)]
-    summary["num_microbial_map_ebv"] = microbial_ebv_df.shape[0]
+    summary[f"num_microbial_map_ebv_{classifier}"] = microbial_ebv_df.shape[0]
+
     microbial_host_df = df_microbial[~df_microbial["ref"].isin(ebv_accs + other_accs)]
-    summary["num_microbial_map_host"] = microbial_host_df.shape[0]
+    summary[f"num_microbial_map_host_{classifier}"] = microbial_host_df.shape[0]
+
     microbial_host_verified_df = microbial_host_df[microbial_host_df["human"]==True]
-    summary["num_microbial_map_host_verified"] = microbial_host_verified_df.shape[0]
+    summary[f"num_microbial_map_host_verified_{classifier}"] = microbial_host_verified_df.shape[0]
 
     if microbial_total > 0:
-        summary["prop_microbial_unmapped"] = summary["num_microbial_unmapped"]/microbial_total
-        summary["prop_microbial_map_ebv"] = summary["num_microbial_map_ebv"]/microbial_total
-        summary["prop_microbial_map_host"] = summary["num_microbial_map_host"]/microbial_total
-        summary["prop_microbial_map_host_verified"] = summary["num_microbial_map_host_verified"]/microbial_total
+        summary[f"prop_microbial_unmapped_{classifier}"] = summary[f"num_microbial_unmapped_{classifier}"]/microbial_total
+        summary[f"prop_microbial_map_ebv_{classifier}"] = summary[f"num_microbial_map_ebv_{classifier}"]/microbial_total
+        summary[f"prop_microbial_map_host_{classifier}"] = summary[f"num_microbial_map_host_{classifier}"]/microbial_total
+        summary[f"prop_microbial_map_host_verified_{classifier}"] = summary[f"num_microbial_map_host_verified_{classifier}"]/microbial_total
     else:
-        summary["prop_microbial_unmapped"] = 0
-        summary["prop_microbial_map_ebv"] = 0
-        summary["prop_microbial_map_host"] = 0
-        summary["prop_microbial_map_host_verified"] = 0
+        summary[f"prop_microbial_unmapped_{classifier}"] = 0
+        summary[f"prop_microbial_map_ebv_{classifier}"] = 0
+        summary[f"prop_microbial_map_host_{classifier}"] = 0
+        summary[f"prop_microbial_map_host_verified_{classifier}"] = 0
 
-    #6. For reads which classify as microbial but map to host, what is the (mean, median, max) length, quality, confidence, prop_unique_microbial, prop_unique_host, prop_microbial prop_host, num_hits_microbial, num_hits_host
-    for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', '5mer_ratio', 'compression', 'mapped_prop']:
-        summary[f"mean_{column}_microbial_map_host"] = microbial_host_df[column].mean()
-        summary[f"median_{column}_microbial_map_host"] = microbial_host_df[column].median()
-        summary[f"max_{column}_microbial_map_host"] = microbial_host_df[column].max()
-        summary[f"min_{column}_microbial_map_host"] = microbial_host_df[column].min()
-    for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', '5mer_ratio', 'compression', 'mapped_prop', "pident"]:
-        summary[f"mean_{column}_microbial_map_host_verified"] = microbial_host_verified_df[column].mean()
-        summary[f"median_{column}_microbial_map_host_verified"] = microbial_host_verified_df[column].median()
-        summary[f"max_{column}_microbial_map_host_verified"] = microbial_host_verified_df[column].max()
-        summary[f"min_{column}_microbial_map_host_verified"] = microbial_host_verified_df[column].min()
+    data_file = Path(f"{prefix}_{classifier}_microbial_data.csv")
+    microbial_host_df.to_csv(data_file, index=False)
+    return microbial_host_df
 
-    #7. For reads which classify as microbial and do not classify as host or ebv , what is the (mean, median, max) length, quality, confidence, prop_unique_microbial, prop_unique_host, prop_microbial prop_host, num_hits_microbial, num_hits_host
-    df_microbial_microbial = microbial_unmapped_df
-    for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop', 'gc_ratio', '5mer_ratio', 'compression', 'mapped_prop']:
-        summary[f"mean_{column}_microbial_map_microbial"] = df_microbial_microbial[column].mean()
-        summary[f"median_{column}_microbial_map_microbial"] = df_microbial_microbial[column].median()
-        summary[f"max_{column}_microbial_map_microbial"] = df_microbial_microbial[column].max()
-        summary[f"min_{column}_microbial_map_microbial"] = df_microbial_microbial[column].min()
-
-    #8. Collect basic stats for unclassified reads
-    df_unclassified = df[df["status"] == "U"]
-    unclassified_total = df_unclassified.shape[0]
-
-    for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop']:
-        summary[f"mean_{column}_unclassified"] = df_unclassified[column].mean()
-        summary[f"median_{column}_unclassified"] = df_unclassified[column].median()
-        summary[f"max_{column}_unclassified"] = df_unclassified[column].max()
-        summary[f"min_{column}_unclassified"] = df_unclassified[column].min()
-
-    #9. For reads which classify as microbial and minimap to host but do not have a blast human result, what taxa does blast return
+def check_related_taxa(microbial_host_df, classifier, prefix):
+    #7. For reads which classify as microbial and minimap to host but do not have a blast human result, what taxa does blast return
     related_taxa = set()
     microbial_host_unverified_ids = microbial_host_df[microbial_host_df["human"]==False]["taxids"]
     for i in microbial_host_unverified_ids:
         related_taxa.update(i.split(";"))
 
-    #10. For reads which classify as microbial and map to host and have a blast human result, what human accessions
+    if len(related_taxa) > 0:
+        taxa_file = Path(f"{prefix}_{classifier}_related_taxa.csv")
+        with open(taxa_file, "w") as f:
+            species_ids = []
+            species_names = []
+            for taxid in related_taxa:
+                t = taxoniq.Taxon(int(taxid))
+                for s in t.ranked_lineage:
+                    if s.rank.name == "species":
+                        if s.tax_id not in species_ids:
+                            species_ids.append(s.tax_id)
+                            species_names.append(s.scientific_name)
+            species_ids = [str(id) for id in species_ids]
+            f.write(f"{','.join(related_taxa)}\n")
+            f.write(f"{','.join(species_ids)}\n")
+            f.write(f"{','.join(species_names)}\n")
+        sys.stderr.write(f"Found microbial taxa which are closely related to human for classifier {classifier}:\n{species_names}\n")
+
+def check_human_accs(microbial_host_df, classifier, prefix):
+    #8. For reads which classify as microbial and map to host and have a blast human result, what human accessions
     human_accs = set()
     microbial_host_verified_accs = microbial_host_df[microbial_host_df["human"]==True]["human_accs"]
     for i in microbial_host_verified_accs:
         human_accs.update(i.split(";"))
 
-    return summary, microbial_host_df, host_host_df, related_taxa, human_accs
+    if len(human_accs) > 0:
+        accs_file = Path(f"{prefix}_{classifier}_human_accs.csv")
+        with open(accs_file, "w") as f:
+            f.write(",".join(human_accs))
+        sys.stderr.write(f"Found human accessions which are classified as microbial for classifier {classifier}:\n{human_accs}\n")
+
+def add_unclassified_to_summary(df, summary):
+    #8. Collect basic stats for unclassified reads
+    df_unclassified = df[df["status"] == "U"]
+    unclassified_total = df_unclassified.shape[0]
+
+    for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop']:
+        summary[f"mean_{column}_unclassified_charon"] = df_unclassified[column].mean()
+        summary[f"median_{column}_unclassified_charon"] = df_unclassified[column].median()
+        summary[f"max_{column}_unclassified_charon"] = df_unclassified[column].max()
+        summary[f"min_{column}_unclassified_charon"] = df_unclassified[column].min()
+
+def generate_summary(df, prefix, others=[]):
+    sys.stderr.write("GENERATE SUMMARY\n")
+    summary = {}
+
+    add_classified_counts_to_summary(df, summary, others=others)
+
+    for classifier in ["charon"] + others:
+        add_host_counts_to_summary(df, summary, classifier, prefix)
+
+        microbial_host_df = add_microbial_counts_to_summary(df, summary, classifier, prefix)
+        check_related_taxa(microbial_host_df, classifier, prefix)
+        check_human_accs(microbial_host_df, classifier, prefix)
+
+        if classifier == "charon":
+            add_unclassified_to_summary(df, summary)
+
+    return summary
 
 # Main method
 def main():
@@ -354,33 +415,7 @@ def main():
         charon_df = pd.read_csv(full_file, index_col=None)
         charon_df['classification'] = charon_df['classification'].fillna("")
 
-    summary,microbial_host_df, host_unmapped_df, related_taxa, human_accs = generate_summary(charon_df)
-    if len(related_taxa) > 0:
-        taxa_file = Path(args.prefix + "_related_taxa.csv")
-        with open(taxa_file, "w") as f:
-            species_ids = []
-            species_names = []
-            for taxid in related_taxa:
-                t = taxoniq.Taxon(int(taxid))
-                for s in t.ranked_lineage:
-                    if s.rank.name == "species":
-                        if s.tax_id not in species_ids:
-                            species_ids.append(s.tax_id)
-                            species_names.append(s.scientific_name)
-            species_ids = [str(id) for id in species_ids]
-            f.write(f"{','.join(related_taxa)}\n")
-            f.write(f"{','.join(species_ids)}\n")
-            f.write(f"{','.join(species_names)}\n")
-        sys.stderr.write(f"Found microbial taxa which are closely related to human:\n{species_names}\n")
-    if len(human_accs) > 0:
-        accs_file = Path(args.prefix + "_human_accs.csv")
-        with open(accs_file, "w") as f:
-            f.write(",".join(human_accs))
-        sys.stderr.write(f"Found human accessions which are classified as microbial:\n{human_accs}\n")
-    data_file = Path(args.prefix + "_microbial_data.csv")
-    microbial_host_df.to_csv(data_file, index=False)
-    data_file = Path(args.prefix + "_host_data.csv")
-    host_unmapped_df.to_csv(data_file, index=False)
+    summary = generate_summary(charon_df)
 
     # Save to CSV
     fieldnames = ["file"] + list(summary.keys())

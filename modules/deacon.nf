@@ -15,28 +15,27 @@ process download_deacon_index {
 process run_deacon {
 
     label "process_medium"
-    container 'docker.io/rmcolq/deacon:v1.0.5'
+    container 'community.wave.seqera.io/library/deacon:0.5.0--5e06f862e47bcb8a'
 
     input:
     tuple val(unique_id), path(fastq)
     path(deacon_index)
 
     output:
-    tuple val(unique_id), path("deacon_${unique_id}_microbial.f*q.gz"), emit: microbial_fastq
-    tuple val(unique_id), path("deacon_${unique_id}_human.f*q.gz"), emit: human_fastq
-    tuple val(unique_id), path("deacon_${unique_id}_microbial.f*q.gz"), path("deacon_${unique_id}_human.f*q.gz"),  emit: combined
+    tuple val(unique_id), path("deacon_${unique_id}_microbial.fq.gz"), emit: microbial_fastq
+    tuple val(unique_id), path("deacon_${unique_id}_human.fq.gz"), emit: human_fastq
+    tuple val(unique_id), path("deacon_${unique_id}_microbial.fq.gz"), path("deacon_${unique_id}_human.fq.gz"),  emit: combined
 
     script:
     """
-    deacon filter ${deacon_index} ${fastq} -o "deacon_${unique_id}_microbial.f*q.gz"
-    deacon filter -d ${deacon_index} ${fastq} -o "deacon_${unique_id}_human.f*q.gz"
+    deacon filter ${deacon_index} ${fastq} -o "deacon_${unique_id}_microbial.fq.gz"
+    deacon filter -d ${deacon_index} ${fastq} -o "deacon_${unique_id}_human.fq.gz"
     """
 }
 
 process collect_classifications {
 
     label "process_low"
-    container 'docker.io/rmcolq/deacon:v1.0.5'
 
     input:
     tuple val(unique_id), path(microbial_fastq), path(host_fastq)

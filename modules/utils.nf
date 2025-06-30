@@ -127,6 +127,7 @@ process blastn_microbial_host_hits {
         -out results_blastn.txt \
         -evalue 1e-6 \
         -perc_identity 80 \
+        -max_target_seqs 5 \
         -outfmt "6 qseqid sacc sscinames staxids sstart send evalue pident length"
     else
       touch "results_blastn.txt"
