@@ -19,8 +19,7 @@ process run_charon {
     """
     charon dehost ${fastq} \
       --db ${db} \
-      --confidence 5 \
-      --min_length 350 \
+      --confidence 7 \
       --log charon_${unique_id}.log \
       --extract all \
       --prefix charon_${unique_id} \
