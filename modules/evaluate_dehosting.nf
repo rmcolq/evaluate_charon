@@ -25,7 +25,7 @@ process evaluate_summary {
       --host_sam ${host_sam} \
       --blast_result ${blast_result} \
       --additional ${additional_report} \
-      -p "charon_${unique_id}"
+      -p "${unique_id}"
     """
 }
 
@@ -39,22 +39,29 @@ workflow evaluate_dehosting {
     evaluate_deacon(fastq_ch)
 
     evaluate_charon.out.host_sam.concat(evaluate_deacon.out.host_sam)
-                                .collectFile( keepHeader:true, skip:29, newLine:true)
+                                .collectFile( keepHeader:true, skip:33) { unique_id, sam -> ["${unique_id}.host.sam", sam.text] }
+                                .map { f -> [f.simpleName, f] }
+                                .view()
                                 .set{ host_sam }
 
     evaluate_charon.out.microbial_sam.concat(evaluate_deacon.out.microbial_sam)
-                                     .collectFile( keepHeader:true, skip:29, newLine:true)
+                                     .collectFile( keepHeader:true, skip:33) { unique_id, sam -> ["${unique_id}.microbial.sam", sam.text] }
+                                     .map { f -> [f.simpleName, f] }
+                                     .view()
                                      .set{ microbial_sam }
 
     evaluate_charon.out.blast.concat(evaluate_deacon.out.blast)
-                             .collectFile(newLine:true)
+                             .collectFile()  { unique_id, txt -> ["${unique_id}.blast_result.txt", txt.text] }
+                             .map { f -> [f.simpleName, f] }
+                             .view()
                              .set{ blast }
 
-    evaluate_charon.out.report
+   evaluate_charon.out.report
                  .combine(host_sam, by: 0)
                  .combine(microbial_sam, by: 0)
                  .combine(blast, by: 0)
                  .combine(evaluate_deacon.out.report, by:0)
+                 .view()
                  .set{ eval_ch }
 
     evaluate_summary(eval_ch)

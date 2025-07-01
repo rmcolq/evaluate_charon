@@ -45,9 +45,9 @@ process collect_classifications {
 
     script:
     """
-    zgrep ">" ${microbial_fastq} | cut -f1 -d" " | cut -f2 -d'>' > list_microbial
-    zgrep ">" ${host_fastq} | cut -f1 -d" " | cut -f2 -d'>' > list_host
-    #echo -e "status\tread_id\tclassification" > "deacon_${unique_id}.out"
+    cat ${host_fastq}  | gunzip | awk 'NR%4==1 {print substr(\$1,2)}' > list_host
+    cat ${microbial_fastq}  | gunzip | awk 'NR%4==1 {print substr(\$1,2)}' > list_microbial
+    echo -e "read_id\tclassification" > "deacon_${unique_id}.out"
     for id in \$(cat list_microbial)
       do
         echo -e "\$id\tmicrobial"

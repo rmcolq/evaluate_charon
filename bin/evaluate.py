@@ -149,8 +149,8 @@ def load_charon_output(path):
 def load_tsv_output(path, classifier, df):
     sys.stderr.write("LOAD TSV OUTPUT from " + path + "\n")
     entries = []
-    with open(path, newline='', sep="\t") as csvfile:
-        reader = csv.DictReader(csvfile)
+    with open(path, newline='') as csvfile:
+        reader = csv.DictReader(csvfile, delimiter="\t")
         for row in reader:
             entry = {"read_id":row["read_id"], classifier: row["classification"]}
             entries.append(entry)
@@ -352,7 +352,7 @@ def main():
         help="TSV output by charon",
     )
     parser.add_argument(
-        "-a",
+        "--additional",
         dest="additional",
         required=False,
         help="Additional TSV for another classifier",
@@ -415,7 +415,7 @@ def main():
         charon_df = pd.read_csv(full_file, index_col=None)
         charon_df['classification'] = charon_df['classification'].fillna("")
 
-    summary = generate_summary(charon_df)
+    summary = generate_summary(charon_df, args.prefix, others=["deacon"])
 
     # Save to CSV
     fieldnames = ["file"] + list(summary.keys())
