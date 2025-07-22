@@ -40,12 +40,10 @@ workflow evaluate_dehosting {
     evaluate_deacon(fastq_ch)
 
     evaluate_charon.out.host_sam.combine(evaluate_deacon.out.host_sam, by: 0)
-                                .map { unique_id, charon_sam, deacon_sam -> [unique_id, "host", charon_sam, deacon_sam] }
                                 .set{ host_sam_list }
     cat_host_sam_files(host_sam_list)
 
     evaluate_charon.out.microbial_sam.combine(evaluate_deacon.out.microbial_sam, by: 0)
-                                .map { unique_id, charon_sam, deacon_sam -> [unique_id, "microbial", charon_sam, deacon_sam] }
                                 .set{ microbial_sam_list }
     cat_microbial_sam_files(microbial_sam_list)
 
