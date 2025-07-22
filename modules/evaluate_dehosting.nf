@@ -54,7 +54,7 @@ workflow evaluate_dehosting {
                              .set{ blast }
 
    evaluate_charon.out.report
-                 .combine(cat_microbial_sam_files.out, by: 0)
+                 .combine(cat_host_sam_files.out, by: 0)
                  .combine(cat_microbial_sam_files.out, by: 0)
                  .combine(blast, by: 0)
                  .combine(evaluate_deacon.out.report, by:0)

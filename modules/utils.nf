@@ -149,7 +149,7 @@ process cat_host_sam_files {
     script:
     """
     cat ${charon_sam} > "${unique_id}.host.sam"
-    cat ${deacon_sam} | tail -n+33 >> "${unique_id}.host.sam"
+    cat ${deacon_sam} | tail -n+34 >> "${unique_id}.host.sam"
     """
 }
 
@@ -167,6 +167,6 @@ process cat_microbial_sam_files {
     script:
     """
     cat ${charon_sam} > "${unique_id}.microbial.sam"
-    cat ${deacon_sam} | tail -n+33 >> "${unique_id}.microbial.sam"
+    cat ${deacon_sam} | tail -n+34 >> "${unique_id}.microbial.sam"
     """
 }
