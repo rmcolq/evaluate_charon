@@ -4,6 +4,7 @@ include { minimap2_microbial; minimap2_host; extract_microbial_host_hits; blastn
 process download_deacon_index {
     label "process_single"
     storeDir "${params.store_dir}/deacon/"
+    container 'community.wave.seqera.io/library/deacon:0.5.0--5e06f862e47bcb8a'
     output:
         path("*.idx")
 
@@ -22,8 +23,8 @@ process run_deacon {
     path(deacon_index)
 
     output:
-    tuple val(unique_id), path("deacon_${unique_id}_microbial.fq.gz"), emit: microbial_fastq
-    tuple val(unique_id), path("deacon_${unique_id}_human.fq.gz"), emit: human_fastq
+    tuple val(unique_id), val("deacon"), path("deacon_${unique_id}_microbial.fq.gz"), emit: microbial_fastq
+    tuple val(unique_id), val("deacon"), path("deacon_${unique_id}_human.fq.gz"), emit: human_fastq
     tuple val(unique_id), path("deacon_${unique_id}_microbial.fq.gz"), path("deacon_${unique_id}_human.fq.gz"),  emit: combined
 
     script:
@@ -36,6 +37,7 @@ process run_deacon {
 process collect_classifications {
 
     label "process_low"
+    container 'community.wave.seqera.io/library/deacon:0.5.0--5e06f862e47bcb8a'
 
     input:
     tuple val(unique_id), path(microbial_fastq), path(host_fastq)

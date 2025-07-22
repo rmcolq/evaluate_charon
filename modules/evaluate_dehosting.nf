@@ -1,5 +1,6 @@
 include { evaluate_charon } from '../modules/charon'
 include { evaluate_deacon } from '../modules/deacon'
+include { cat_host_sam_files; cat_microbial_sam_files } from '../modules/utils'
 
 process evaluate_summary {
 
@@ -38,17 +39,15 @@ workflow evaluate_dehosting {
     evaluate_charon(fastq_ch)
     evaluate_deacon(fastq_ch)
 
-    evaluate_charon.out.host_sam.concat(evaluate_deacon.out.host_sam)
-                                .collectFile( keepHeader:true, skip:33) { unique_id, sam -> ["${unique_id}.host.sam", sam.text] }
-                                .map { f -> [f.simpleName, f] }
-                                .view()
-                                .set{ host_sam }
+    evaluate_charon.out.host_sam.combine(evaluate_deacon.out.host_sam, by: 0)
+                                .map { unique_id, charon_sam, deacon_sam -> [unique_id, "host", charon_sam, deacon_sam] }
+                                .set{ host_sam_list }
+    cat_host_sam_files(host_sam_list)
 
-    evaluate_charon.out.microbial_sam.concat(evaluate_deacon.out.microbial_sam)
-                                     .collectFile( keepHeader:true, skip:33) { unique_id, sam -> ["${unique_id}.microbial.sam", sam.text] }
-                                     .map { f -> [f.simpleName, f] }
-                                     .view()
-                                     .set{ microbial_sam }
+    evaluate_charon.out.microbial_sam.combine(evaluate_deacon.out.microbial_sam, by: 0)
+                                .map { unique_id, charon_sam, deacon_sam -> [unique_id, "microbial", charon_sam, deacon_sam] }
+                                .set{ microbial_sam_list }
+    cat_microbial_sam_files(microbial_sam_list)
 
     evaluate_charon.out.blast.concat(evaluate_deacon.out.blast)
                              .collectFile()  { unique_id, txt -> ["${unique_id}.blast_result.txt", txt.text] }
@@ -57,8 +56,8 @@ workflow evaluate_dehosting {
                              .set{ blast }
 
    evaluate_charon.out.report
-                 .combine(host_sam, by: 0)
-                 .combine(microbial_sam, by: 0)
+                 .combine(cat_microbial_sam_files.out, by: 0)
+                 .combine(cat_microbial_sam_files.out, by: 0)
                  .combine(blast, by: 0)
                  .combine(evaluate_deacon.out.report, by:0)
                  .view()
