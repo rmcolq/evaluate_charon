@@ -17,7 +17,7 @@ process bam_to_fastq {
     """
 }
 
-process minimap2_microbial {
+process minimap2_microbial_chunk {
 
     label "process_medium"
 
@@ -28,7 +28,7 @@ process minimap2_microbial {
         tuple val(unique_id), val(method), path(fastq)
         path refs
     output:
-        tuple val(unique_id), path("microbial.${method}.mmp.sam")
+        tuple val(unique_id), val(method), path("microbial.${fastq.baseName}.mmp.sam")
     script:
         if ( params.evaluate_microbial ) {
             preset = ""
@@ -38,7 +38,7 @@ process minimap2_microbial {
                 preset = "map-ont"
             }
             """
-            minimap2 -ax ${preset} ${refs} ${fastq} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > microbial.${method}.mmp.sam
+            minimap2 -ax ${preset} ${refs} ${fastq} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > microbial.${fastq.baseName}.mmp.sam
             """
         } else {
             """
@@ -46,6 +46,29 @@ process minimap2_microbial {
             """
         }
         
+}
+
+workflow minimap2_microbial {
+    take:
+    fastq_ch
+    refs
+
+    main:
+    fastq_ch.map{unique_id, method, fastq -> [unique_id, method, fastq.splitFastq(by: params.chunk_size, file:true)]}
+            .transpose()
+            .set{chunked_fastq_ch}
+    minimap2_microbial_chunk(chunked_fastq_ch, refs)
+    //minimap2_microbial_chunk.out.collectFile { unique_id, method, result -> ["${unique_id}_${method}_microbial.mmp.sam", result]}
+    //        .set{ sam_ch }
+    minimap2_microbial_chunk.out.set{ chunk_sam_ch }
+    minimap2_microbial_chunk.out.groupTuple(by: [0,1]).set{collected_sam}
+    collected_sam.view()
+    cat_all_microbial_sam_files(collected_sam)
+    cat_all_microbial_sam_files.out.set{ sam_ch }
+    
+    emit:
+    chunk_sam_ch
+    sam_ch
 }
 
 process minimap2_host {
@@ -86,11 +109,11 @@ process extract_microbial_host_hits {
     container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
 
     input:
-    tuple val(unique_id), path(sam_file)
+    tuple val(unique_id), val(method), path(sam_file)
     path ref_bed
 
     output:
-    tuple val(unique_id), path("query.fasta")
+    tuple val(unique_id), val(method), path("query.fasta")
 
     script:
     """
@@ -108,11 +131,11 @@ process blastn_microbial_host_hits {
     container "ncbi/blast"
 
     input:
-    tuple val(unique_id), path(fasta_file)
+    tuple val(unique_id), val(method), path(fasta_file)
     path(blast_db)
 
     output:
-    tuple val(unique_id), path("results_blastn.txt")
+    tuple val(unique_id), val(method), path("results_blastn.txt")
 
     script:
     if (params.blast_db){
@@ -126,7 +149,7 @@ process blastn_microbial_host_hits {
         -db ${db} \
         -out results_blastn.txt \
         -evalue 1e-6 \
-        -perc_identity 80 \
+        -perc_identity 85 \
         -max_target_seqs 5 \
         -outfmt "6 qseqid sacc sscinames staxids sstart send evalue pident length"
     else
@@ -153,6 +176,27 @@ process cat_host_sam_files {
     """
 }
 
+process cat_all_microbial_sam_files {
+
+    label "process_low"
+    container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
+
+    input:
+    tuple val(unique_id), val(method), path(sam_files)
+
+    output:
+    tuple val(unique_id), path("${unique_id}.${method}.microbial.sam")
+
+    script:
+    """
+    cat \$(ls *.mmp.sam | head -n1) > "${unique_id}.${method}.microbial.sam"
+    for sam in \$(ls *.mmp.sam | tail -n+2)
+      do
+        cat \$sam | tail -n+34 >> "${unique_id}.${method}.microbial.sam"
+      done
+    """
+}
+
 process cat_microbial_sam_files {
 
     label "process_low"
@@ -169,4 +213,27 @@ process cat_microbial_sam_files {
     cat ${charon_sam} > "${unique_id}.microbial.sam"
     cat ${deacon_sam} | tail -n+34 >> "${unique_id}.microbial.sam"
     """
+}
+
+workflow verify_microbial_host_hits {
+    take:
+        microbial_fastq_ch
+
+    main:
+        blast_ch = Channel.empty()
+        ref_bed = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true)
+        extract_microbial_host_hits(microbial_fastq_ch, ref_bed)
+        
+        if (params.blast_db)
+            blast_db = file(params.blast_db, type: "dir", checkIfExists:true)
+        else
+            blast_db = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true) // any file will do to not block
+
+        blastn_microbial_host_hits(extract_microbial_host_hits.out, blast_db)
+        blastn_microbial_host_hits.out.collectFile { unique_id, method, result -> ["${unique_id}_${method}_results_blastn.txt", result]}
+            .set{ blast_ch }
+
+    emit:
+        blast_ch
+
 }

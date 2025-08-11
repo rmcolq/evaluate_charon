@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-include { minimap2_microbial; minimap2_host; extract_microbial_host_hits; blastn_microbial_host_hits } from '../modules/utils'
+include { minimap2_microbial; minimap2_host; verify_microbial_host_hits } from '../modules/utils'
 
 process download_deacon_index {
     label "process_single"
@@ -75,22 +75,15 @@ workflow evaluate_deacon {
     minimap2_host(run_deacon.out.human_fastq, refs)
 
     if ( params.evaluate_microbial ){
-        blast_ch = Channel.empty()
-        ref_bed = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true)
-        extract_microbial_host_hits(minimap2_microbial.out, ref_bed)
-        if (params.blast_db)
-            blast_db = file(params.blast_db, type: "dir", checkIfExists:true)
-        else
-            blast_db = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true) // any file will do to not block
-        blastn_microbial_host_hits(extract_microbial_host_hits.out, blast_db)
-        blastn_microbial_host_hits.out.set{ blast_ch }
+        verify_microbial_host_hits(minimap2_microbial.out.chunk_sam_ch)
+        verify_microbial_host_hits.out.set{ blast_ch }
     } else {
         blast_ch = Channel.empty()
     }
 
     emit:
         report = collect_classifications.out.result
-        microbial_sam = minimap2_microbial.out
+        microbial_sam = minimap2_microbial.out.sam_ch
         host_sam = minimap2_host.out
         blast = blast_ch
 }
