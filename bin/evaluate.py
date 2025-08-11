@@ -239,7 +239,7 @@ def add_host_counts_to_summary(df, summary, classifier, prefix):
     return
 
 def add_microbial_counts_to_summary(df, summary, classifier, prefix):
-    df_microbial = df[df["classification"] == "human"]
+    df_microbial = df[df["classification"] == "microbial"]
     if classifier != "charon":
         df_microbial = df[df[classifier] == "microbial"]
     microbial_total = df_microbial.shape[0]
