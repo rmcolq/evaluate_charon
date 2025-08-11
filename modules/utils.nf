@@ -62,7 +62,6 @@ workflow minimap2_microbial {
     //        .set{ sam_ch }
     minimap2_microbial_chunk.out.set{ chunk_sam_ch }
     minimap2_microbial_chunk.out.groupTuple(by: [0,1]).set{collected_sam}
-    collected_sam.view()
     cat_all_microbial_sam_files(collected_sam)
     cat_all_microbial_sam_files.out.set{ sam_ch }
     
@@ -230,8 +229,9 @@ workflow verify_microbial_host_hits {
             blast_db = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true) // any file will do to not block
 
         blastn_microbial_host_hits(extract_microbial_host_hits.out, blast_db)
-        blastn_microbial_host_hits.out.collectFile { unique_id, method, result -> ["${unique_id}_${method}_results_blastn.txt", result]}
-            .set{ blast_ch }
+        blastn_microbial_host_hits.out.collectFile { unique_id, method, result -> ["${unique_id}.${method}_results_blastn.txt", result.text]}
+                                      .map { f -> [f.simpleName, f] }
+                                      .set{ blast_ch }
 
     emit:
         blast_ch

@@ -50,7 +50,6 @@ workflow evaluate_dehosting {
     evaluate_charon.out.blast.concat(evaluate_deacon.out.blast)
                              .collectFile()  { unique_id, txt -> ["${unique_id}.blast_result.txt", txt.text] }
                              .map { f -> [f.simpleName, f] }
-                             .view()
                              .set{ blast }
 
     evaluate_charon.out.report
