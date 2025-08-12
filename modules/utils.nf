@@ -126,6 +126,7 @@ process extract_microbial_host_hits {
 process blastn_microbial_host_hits {
 
     label "process_medium_plus_mem"
+    label "process_long"
     conda "bioconda::blast=2.16.0"
     container "ncbi/blast"
 
