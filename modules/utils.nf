@@ -58,8 +58,6 @@ workflow minimap2_microbial {
             .transpose()
             .set{chunked_fastq_ch}
     minimap2_microbial_chunk(chunked_fastq_ch, refs)
-    //minimap2_microbial_chunk.out.collectFile { unique_id, method, result -> ["${unique_id}_${method}_microbial.mmp.sam", result]}
-    //        .set{ sam_ch }
     minimap2_microbial_chunk.out.set{ chunk_sam_ch }
     minimap2_microbial_chunk.out.groupTuple(by: [0,1]).set{collected_sam}
     cat_all_microbial_sam_files(collected_sam)
@@ -77,11 +75,13 @@ process minimap2_host {
     conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
 
+    publishDir "${params.outdir}/intermediate/", mode: 'copy', pattern: "*.sam"
+
     input:
         tuple val(unique_id), val(method), path(fastq)
         path refs
     output:
-        tuple val(unique_id), path("host.${method}.mmp.sam")
+        tuple val(unique_id), path("${unique_id}.${method}.host.sam")
     script:
         if ( params.evaluate_host == true ) {
             preset = ""
@@ -92,11 +92,11 @@ process minimap2_host {
             }
             """
             head -n1000000 ${fastq} > small.fq
-            minimap2 -ax ${preset} ${refs} small.fq --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > "host.${method}.mmp.sam"
+            minimap2 -ax ${preset} ${refs} small.fq --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > "${unique_id}.${method}.host.sam"
             """
         } else {
             """
-            touch "host.${method}.mmp.sam"
+            touch "${unique_id}.${method}.host.sam"
             """
         }
 }
@@ -162,6 +162,8 @@ process cat_host_sam_files {
     label "process_low"
     container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
 
+    publishDir "${params.outdir}/intermediate/", mode: 'copy', pattern: "*.sam"
+
     input:
     tuple val(unique_id), path(charon_sam), path(deacon_sam)
 
@@ -179,6 +181,7 @@ process cat_all_microbial_sam_files {
 
     label "process_low"
     container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
+    publishDir "${params.outdir}/intermediate/", mode: 'copy', pattern: "*.sam"
 
     input:
     tuple val(unique_id), val(method), path(sam_files)
@@ -200,6 +203,9 @@ process cat_microbial_sam_files {
 
     label "process_low"
     container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
+   
+    publishDir "${params.outdir}/intermediate/", mode: 'copy', pattern: "*.sam"
+
 
     input:
     tuple val(unique_id), path(charon_sam), path(deacon_sam)
@@ -229,7 +235,7 @@ workflow verify_microbial_host_hits {
             blast_db = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true) // any file will do to not block
 
         blastn_microbial_host_hits(extract_microbial_host_hits.out, blast_db)
-        blastn_microbial_host_hits.out.collectFile { unique_id, method, result -> ["${unique_id}.${method}_results_blastn.txt", result.text]}
+        blastn_microbial_host_hits.out.collectFile (storeDir: "${params.outdir}/intermediate"){ unique_id, method, result -> ["${unique_id}.${method}.results_blastn.txt", result.text]}
                                       .map { f -> [f.simpleName, f] }
                                       .set{ blast_ch }
 

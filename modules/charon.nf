@@ -6,6 +6,9 @@ process run_charon {
     label "process_medium_plus_mem"
     container 'docker.io/rmcolq/charon:v1.0.5'
 
+    publishDir "${params.outdir}/${unique_id}/intermediate/", mode: 'copy', pattern: "*.out"
+
+
     input:
     tuple val(unique_id), path(fastq)
     path(db)
@@ -13,7 +16,7 @@ process run_charon {
     output:
     tuple val(unique_id), val("charon"), path("charon_${unique_id}_microbial.f*q.gz"), emit: microbial_fastq
     tuple val(unique_id), val("charon"), path("charon_${unique_id}_human.f*q.gz"), emit: human_fastq
-    tuple val(unique_id), path("charon_${unique_id}.out"),  emit: result
+    tuple val(unique_id), path("${unique_id}_charon.out"),  emit: result
 
     script:
     """
@@ -24,7 +27,7 @@ process run_charon {
       --extract all \
       --prefix charon_${unique_id} \
       -t ${task.cpus} \
-      > charon_${unique_id}.out
+      > ${unique_id}_charon.out
     """
 }
 
