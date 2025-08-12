@@ -5,6 +5,8 @@ process download_deacon_index {
     label "process_single"
     storeDir "${params.store_dir}/deacon/"
     container 'community.wave.seqera.io/library/deacon:0.5.0--5e06f862e47bcb8a'
+    maxForks 1
+
     output:
         path("*.idx")
 
@@ -17,6 +19,7 @@ process run_deacon {
 
     label "process_medium"
     container 'community.wave.seqera.io/library/deacon:0.5.0--5e06f862e47bcb8a'
+    maxForks 2
 
     input:
     tuple val(unique_id), path(fastq)

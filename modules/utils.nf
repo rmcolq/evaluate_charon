@@ -4,6 +4,7 @@ process bam_to_fastq {
     label "process_medium"
     conda "bioconda::samtools=1.21"
     container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
+    maxForks 2
 
     input:
     tuple val(unique_id), path(bam)

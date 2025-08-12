@@ -5,6 +5,7 @@ process run_charon {
 
     label "process_medium_plus_mem"
     container 'docker.io/rmcolq/charon:v1.0.5'
+    maxForks 2
 
     publishDir "${params.outdir}/${unique_id}/intermediate/", mode: 'copy', pattern: "*.out"
 
