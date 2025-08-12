@@ -16,6 +16,33 @@ import copy
 
 ebv_accs = ["NC_007605.1","NC_009334.1"]
 other_accs = ["KC670213.1","XR_003525368.1","XR_003525370.1","KC670203.1"]
+key = {
+    "NC_060925.1": "Chromosome 1",
+    "NC_060926.1": "Chromosome 2",
+    "NC_060927.1": "Chromosome 3",
+    "NC_060928.1": "Chromosome 4",
+    "NC_060929.1": "Chromosome 5",
+    "NC_060930.1": "Chromosome 6",
+    "NC_060931.1": "Chromosome 7",
+    "NC_060932.1": "Chromosome 8",
+    "NC_060933.1": "Chromosome 9",
+    "NC_060934.1": "Chromosome 10",
+    "NC_060935.1": "Chromosome 11",
+    "NC_060936.1": "Chromosome 12",
+    "NC_060937.1": "Chromosome 13",
+    "NC_060938.1": "Chromosome 14",
+    "NC_060939.1": "Chromosome 15",
+    "NC_060940.1": "Chromosome 16",
+    "NC_060941.1": "Chromosome 17",
+    "NC_060942.1": "Chromosome 18",
+    "NC_060943.1": "Chromosome 19",
+    "NC_060944.1": "Chromosome 20",
+    "NC_060945.1": "Chromosome 21",
+    "NC_060946.1": "Chromosome 22",
+    "NC_060947.1": "Chromosome X",
+    "NC_060948.1": "Chromosome Y",
+    "JAGYVL020000058.1": "Mitochondrion"
+}
 
 def get_gc_ratio(inputStr):
     compression_ratio = len(inputStr.replace("A","").replace("T",""))/len(inputStr)
@@ -49,7 +76,14 @@ def load_map_info_from_sam(sam):
             else:
                 processed_read_ids.add(read_id)
             mismatches, divergence =  x.tags["NM"], x.tags["de"]
-            entry={"read_id": read_id, "ref": ref, "pos":pos, "ref_start":ref_coords[0], "ref_end":ref_coords[-1], "mapped_length":int(mapped_length), "mismatches": int(mismatches), "identity": 1-(float(mismatches)/float(mapped_length)), "divergence":float(divergence)}
+            ref_name = None
+            if ref in ebv_accs:
+                ref_name = "EBV"
+            elif ref in other_accs:
+                ref_name = "other"
+            elif ref in key:
+                ref_name = key[ref]
+            entry={"read_id": read_id, "ref": ref, "ref_name":ref_name, "pos":pos, "ref_start":ref_coords[0], "ref_end":ref_coords[-1], "mapped_length":int(mapped_length), "mismatches": int(mismatches), "identity": 1-(float(mismatches)/float(mapped_length)), "divergence":float(divergence)}
             entry["seq_length"] = len(x.seq)
             entry["gc_ratio"] = get_gc_ratio(x.seq)
             entry["5mer_ratio"] = get_kmer_ratio(x.seq, 5)
@@ -61,7 +95,7 @@ def load_map_info_from_sam(sam):
                 sys.stderr.write("Processed " + str(len(map_details)) + "\n")
         df = pd.DataFrame(map_details)
     else:
-        columns = ["read_id","ref","pos","ref_start","ref_end","mapped_length","mismatches","identity","divergence","seq_length","gc_ratio","5mer_ratio","A","C","G","T","mapped_prop"]
+        columns = ["read_id","ref","ref_name","pos","ref_start","ref_end","mapped_length","mismatches","identity","divergence","seq_length","gc_ratio","5mer_ratio","A","C","G","T","mapped_prop"]
         df = pd.DataFrame(columns=columns)
     sys.stderr.write("Found " + str(df.shape)  + " entries\n")
     return df
@@ -110,9 +144,10 @@ def load_blast_info(blast_results):
 
 def load_both_sam(host_sam, microbial_sam):
     host_df = load_map_info_from_sam(host_sam)
-    host_df["sam"] = "host"
+    #host_df["sam"] = "host"
     microbial_df = load_map_info_from_sam(microbial_sam)
-    microbial_df["sam"] = "microbial"
+    host_df.drop(host_df[host_df.read_id.isin(microbial_df.read_id)].index, inplace=True)
+    #microbial_df["sam"] = "microbial"
     sys.stderr.write("COMBINE DATAFRAMES\n")
     df = pd.concat([host_df, microbial_df], ignore_index=True)
     df.set_index("read_id")
@@ -139,7 +174,9 @@ def load_charon_output(path):
             entry[f"{category}_unique_prop"] = float(prop_unique_hits)
         entries.append(entry)
     df =  pd.DataFrame(entries)
+    df["charon"] = df["classification"].fillna("unclassified")
     df['classification'] = df['classification'].fillna("")
+
     for column in ["mean_quality", "length", "compression"]:
         m = df[column].mean()
         sd = df[column].std()
@@ -156,7 +193,9 @@ def load_tsv_output(path, classifier, df):
             entries.append(entry)
     new_df =  pd.DataFrame(entries)
     new_df.set_index("read_id")
+    assert df.shape[0] == new_df.shape[0], "The number of rows in the charon output and the additional classifier output do not match."
     df = df.merge(new_df, how="left")
+    assert df.shape[0] == new_df.shape[0], "The number of rows in the charon output df has changed after merging."
     return df
 
 def add_classified_counts_to_summary(df, summary, others=[]):
@@ -399,6 +438,7 @@ def main():
 
         combined_df = mapped_df.merge(blast_df, how="left")
         combined_df.to_csv("combined_df.csv")
+        assert combined_df.shape[0] == mapped_df.shape[0], "The number of rows in the combined dataframe does not match the mapped dataframe."
 
         charon_df = load_charon_output(args.input)
         if args.additional:
@@ -406,10 +446,14 @@ def main():
 
         sys.stderr.write("COMBINE CHARON AND MAPPING DATA\n")
         charon_df.set_index("read_id")
+        old_size = charon_df.shape[0]
         charon_df = charon_df.merge(combined_df, how="left")
+        assert charon_df.shape[0] == old_size, "The number of rows in the charon dataframe changed when combined with mapping dataframe."
+        
+        charon_df['ref_name'] = charon_df['ref_name'].fillna("")
         charon_df["unmapped"] = charon_df["mapped_length"].isna()
 
-        charon_df["file"] = args.input
+        charon_df["sample_id"] = args.input.split("/")[-1].split(".")[0]
         charon_df.to_csv(full_file, index=False)
     else:
         charon_df = pd.read_csv(full_file, index_col=None)
@@ -418,8 +462,8 @@ def main():
     summary = generate_summary(charon_df, args.prefix, others=["deacon"])
 
     # Save to CSV
-    fieldnames = ["file"] + list(summary.keys())
-    summary["file"] = args.input
+    fieldnames = ["sample_id"] + list(summary.keys())
+    summary["sample_id"] = args.input.split("/")[-1].split(".")[0]
 
     summary_file = Path(args.prefix + "_summary.csv")
     writer = None
