@@ -9,6 +9,33 @@ process evaluate_summary {
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy'
 
     input:
+    tuple val(unique_id), path(charon_report), path(host_sam), path(microbial_sam), path(blast_result)
+
+    output:
+    path "${unique_id}_summary.csv", emit: summary
+    path "${unique_id}_full.csv", emit: full
+    path "${unique_id}*_data.csv", emit: data
+    path "${unique_id}*_taxa.csv", emit: taxa, optional:true
+    path "${unique_id}*_accs.csv", emit: accs, optional:true
+
+    script:
+    """
+    evaluate.py \
+      -i ${charon_report} \
+      --microbial_sam ${microbial_sam} \
+      --host_sam ${host_sam} \
+      --blast_result ${blast_result} \
+      -p "${unique_id}"
+    """
+}
+
+process evaluate_summary_plus_additional {
+
+    label "process_low"
+    container 'community.wave.seqera.io/library/simplesam_numpy_pandas_pip_taxoniq:3af1649bdaf86fca'
+    publishDir "${params.outdir}/${unique_id}/", mode: 'copy'
+
+    input:
     tuple val(unique_id), path(charon_report), path(host_sam), path(microbial_sam), path(blast_result), path(additional_report)
 
     output:
@@ -37,30 +64,43 @@ workflow evaluate_dehosting {
     main:
 
     evaluate_charon(fastq_ch)
-    evaluate_deacon(fastq_ch)
 
-    evaluate_charon.out.host_sam.combine(evaluate_deacon.out.host_sam, by: 0)
+    if (params.compare_deacon){
+      evaluate_deacon(fastq_ch)
+
+      evaluate_charon.out.host_sam.combine(evaluate_deacon.out.host_sam, by: 0)
                                 .set{ host_sam_list }
-    cat_host_sam_files(host_sam_list)
+      cat_host_sam_files(host_sam_list)
 
-    evaluate_charon.out.microbial_sam.combine(evaluate_deacon.out.microbial_sam, by: 0)
-                                .set{ microbial_sam_list }
-    cat_microbial_sam_files(microbial_sam_list)
+      evaluate_charon.out.microbial_sam.combine(evaluate_deacon.out.microbial_sam, by: 0)
+                                  .set{ microbial_sam_list }
+      cat_microbial_sam_files(microbial_sam_list)
 
-    evaluate_charon.out.blast.concat(evaluate_deacon.out.blast)
-                             .collectFile()  { unique_id, txt -> ["${unique_id}.blast_result.txt", txt.text] }
-                             .map { f -> [f.simpleName, f] }
-                             .set{ blast }
+      evaluate_charon.out.blast.concat(evaluate_deacon.out.blast)
+                              .collectFile()  { unique_id, txt -> ["${unique_id}.blast_result.txt", txt.text] }
+                              .map { f -> [f.simpleName, f] }
+                              .set{ blast }
 
-    evaluate_charon.out.report
-                 .combine(cat_host_sam_files.out, by: 0)
-                 .combine(cat_microbial_sam_files.out, by: 0)
-                 .combine(blast, by: 0)
-                 .combine(evaluate_deacon.out.report, by:0)
+      evaluate_charon.out.report
+                  .combine(cat_host_sam_files.out, by: 0)
+                  .combine(cat_microbial_sam_files.out, by: 0)
+                  .combine(blast, by: 0)
+                  .combine(evaluate_deacon.out.report, by:0)
+                  .view()
+                  .set{ eval_ch }
+
+      evaluate_summary_plus_additional(eval_ch)
+
+    } else {
+      evaluate_charon.out.report
+                 .combine(evaluate_charon.out.host_sam, by: 0)
+                 .combine(evaluate_charon.out.microbial_sam, by: 0)
+                 .combine(evaluate_charon.out.blast, by: 0)
                  .view()
                  .set{ eval_ch }
 
-    evaluate_summary(eval_ch)
+      evaluate_summary(eval_ch)
+    }
 }
 
 
