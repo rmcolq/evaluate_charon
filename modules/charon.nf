@@ -1,13 +1,13 @@
 #!/usr/bin/env nextflow
 include { minimap2_microbial; minimap2_host; verify_microbial_host_hits } from '../modules/utils'
 
-process run_charon_chunk {
+process run_charon {
 
     label "process_medium"
     container 'docker.io/rmcolq/charon:v1.0.5'
     maxForks 4
 
-    //publishDir "${params.outdir}/${unique_id}/intermediate/", mode: 'copy', pattern: "*.out"
+    publishDir "${params.outdir}/${unique_id}/intermediate/", mode: 'copy', pattern: "*.out"
 
 
     input:
@@ -15,9 +15,9 @@ process run_charon_chunk {
     path(db)
 
     output:
-    tuple val(unique_id), val("charon"), path("charon_${unique_id}_microbial.f*q"), emit: microbial_fastq
-    tuple val(unique_id), val("charon"), path("charon_${unique_id}_human.f*q"), emit: human_fastq
-    tuple val(unique_id), path("${unique_id}_charon.out"),  emit: result
+    tuple val(unique_id), val("charon"), path("charon_${unique_id}_microbial.f*q.gz"), emit: microbial_fastq
+    tuple val(unique_id), val("charon"), path("charon_${unique_id}_human.f*q.gz"), emit: human_fastq
+    tuple val(unique_id), val("charon"), path("${unique_id}_charon.out"),  emit: result
 
     script:
     """
@@ -30,10 +30,6 @@ process run_charon_chunk {
       -t ${task.cpus} \
       > ${unique_id}_charon.out
 
-    PATTERN=(charon_${unique_id}*.f*q.gz)
-    if [ -f \${PATTERN[0]} ]; then
-        gunzip charon_${unique_id}*.f*q.gz
-    fi
     """
 }
 
@@ -48,51 +44,6 @@ process compress {
     """
     gzip -c ${fastq} > "${fastq}.gz"
     """
-}
-
-process compress2 {
-    input:
-    tuple val(unique_id), val(method), path(fastq)
-
-    output:
-    tuple val(unique_id), val(method), path("${fastq}.gz")
-
-    script:
-    """
-    gzip -c ${fastq} > "${fastq}.gz"
-    """
-}
-
-workflow run_charon {
-    take:
-    fastq_ch
-    db
-
-    main:
-    fastq_ch.map{unique_id, fastq -> [unique_id, fastq.splitFastq(by: params.chunk_size, file:true, compress:true)]}
-            .transpose()
-            .set{chunked_fastq_ch}
-    run_charon_chunk(chunked_fastq_ch, db)
-    
-    run_charon_chunk.out.microbial_fastq.collectFile (storeDir: "${params.outdir}/intermediate"){ unique_id, method, result -> ["${unique_id}.charon_microbial.f*q", result.text] }
-                                      .map { f -> [f.simpleName, "charon", f] }
-                                      | compress
-                                      | set{ microbial_fastq }
-
-    run_charon_chunk.out.human_fastq.collectFile(storeDir: "${params.outdir}/intermediate"){ unique_id, method, result -> ["${unique_id}.charon_human.f*q", result.text] }
-                                      .map { f -> [f.simpleName, "charon", f] }
-                                      | compress2
-                                      | set{ human_fastq }
-
-    run_charon_chunk.out.result.collectFile(storeDir: "${params.outdir}/intermediate"){ unique_id, result -> ["${unique_id}.charon.out", result.text]}
-                                      .map { f -> [f.simpleName, f] }
-                                      .set{ result }
-    
-    
-    emit:
-    microbial_fastq
-    human_fastq
-    result
 }
 
 workflow evaluate_charon {
@@ -113,6 +64,7 @@ workflow evaluate_charon {
     } else {
         blast_ch = Channel.empty()
     }
+
 
     emit:
     report = run_charon.out.result

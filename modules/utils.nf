@@ -245,3 +245,30 @@ workflow verify_microbial_host_hits {
         blast_ch
 
 }
+
+process evaluate_summary {
+
+    label "process_low"
+    container 'community.wave.seqera.io/library/simplesam_numpy_pandas_pip_taxoniq:3af1649bdaf86fca'
+    publishDir "${params.outdir}/${unique_id}/", mode: 'copy'
+
+    input:
+    tuple val(unique_id), val(classifier), path(report), path(host_sam), path(microbial_sam), path(blast_result)
+
+    output:
+    path "${unique_id}*_summary.csv", emit: summary
+    path "${unique_id}_full.csv", emit: full
+    path "${unique_id}*_data.csv", emit: data
+    path "${unique_id}*_taxa.csv", emit: taxa, optional:true
+    path "${unique_id}*_accs.csv", emit: accs, optional:true
+
+    script:
+    """
+    evaluate.py \
+      -i ${report} \
+      --microbial_sam ${microbial_sam} \
+      --host_sam ${host_sam} \
+      --blast_result ${blast_result} \
+      -p "${unique_id}_${classifier}"
+    """
+}

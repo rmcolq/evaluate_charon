@@ -183,74 +183,58 @@ def load_charon_output(path):
         df[f"{column}_num_stds"] = (df[column]-m)/sd
     return df
 
-def load_tsv_output(path, classifier, df):
+def load_tsv_output(path, classifier):
     sys.stderr.write("LOAD TSV OUTPUT from " + path + "\n")
     entries = []
     with open(path, newline='') as csvfile:
         reader = csv.DictReader(csvfile, delimiter="\t")
         for row in reader:
-            entry = {"read_id":row["read_id"], classifier: row["classification"]}
+            entry = {"status":"C", "read_id":row["read_id"], "classification": row["classification"]}
             entries.append(entry)
-    new_df =  pd.DataFrame(entries)
-    new_df.set_index("read_id")
-    assert df.shape[0] == new_df.shape[0], "The number of rows in the charon output and the additional classifier output do not match."
-    df = df.merge(new_df, how="left")
-    assert df.shape[0] == new_df.shape[0], "The number of rows in the charon output df has changed after merging."
+    df =  pd.DataFrame(entries)
+    df[classifier] = df["classification"].fillna("unclassified")
+
     return df
 
-def add_classified_counts_to_summary(df, summary, others=[]):
+def load_output(path):
+    if "charon" in path:
+        return "charon", load_charon_output(path)
+    else:
+        classifier = path.split(".out")[0].split("_")[-1]   
+        return classifier, load_tsv_output(path, classifier)
+    
+
+def add_classified_counts_to_summary(df, summary, classifier):
     #1. How many host, microbial, unclassified reads were there for charon?
     g = df.groupby(["status","classification"]).count()
 
     if ("C","human") in g["read_id"].index:
-        summary["num_host_charon"] = g["read_id"]["C"]["human"]
+        summary[f"num_host_{classifier}"] = g["read_id"]["C"]["human"]
     else:
-        summary["num_host_charon"] = 0
+        summary[f"num_host_{classifier}"] = 0
 
     if ("C","microbial") in g["read_id"].index:
-        summary["num_microbial_charon"] = g["read_id"]["C"]["microbial"]
+        summary[f"num_microbial_{classifier}"] = g["read_id"]["C"]["microbial"]
     else:
-        summary["num_microbial_charon"] = 0
+        summary[f"num_microbial_{classifier}"] = 0
 
     if ("U","") in g["read_id"].index:
-        summary["num_unclassified_charon"] = g["read_id"]["U"][""]
+        summary[f"num_unclassified_{classifier}"] = g["read_id"]["U"][""]
     else:
-        summary["num_unclassified_charon"] = 0
+        summary[f"num_unclassified_{classifier}"] = 0
 
-    summary["total"] = summary["num_host_charon"] + summary["num_microbial_charon"] + summary["num_unclassified_charon"]
-    summary["classified"] = summary["num_host_charon"] + summary["num_microbial_charon"]
+    summary["total"] = summary[f"num_host_{classifier}"] + summary[f"num_microbial_{classifier}"] + summary[f"num_unclassified_{classifier}"]
+    summary[f"classified_{classifier}"] = summary[f"num_host_{classifier}"] + summary[f"num_microbial_{classifier}"]
 
     #2. Scale these to proportions
-    summary["prop_host_charon"] = summary["num_host_charon"]/summary["total"]
-    summary["prop_microbial_charon"] = summary["num_microbial_charon"]/summary["total"]
-    summary["prop_unclassified_charon"] = summary["num_unclassified_charon"]/summary["total"]
-
-    # Process OTHER classifiers
-    for classifier in others:
-        #3. How many host, microbial, unclassified reads were there?
-        g = df.groupby([classifier]).count()
-
-        if ("human") in g["read_id"].index:
-            summary[f"num_host_{classifier}"] = g["read_id"]["human"]
-        else:
-            summary[f"num_host_{classifier}"] = 0
-
-        if ("microbial") in g["read_id"].index:
-            summary[f"num_microbial_{classifier}"] = g["read_id"]["microbial"]
-        else:
-            summary[f"num_microbial_{classifier}"] = 0
-
-        #4. Scale these to proportions
-        assert summary["total"] == summary[f"num_host_{classifier}"] + summary[f"num_microbial_{classifier}"]
-        summary[f"prop_host_{classifier}"] = summary[f"num_host_{classifier}"]/summary["total"]
-        summary[f"prop_microbial_{classifier}"] = summary[f"num_microbial_{classifier}"]/summary["total"]
+    summary[f"prop_host_{classifier}"] = summary[f"num_host_{classifier}"]/summary["total"]
+    summary[f"prop_microbial_{classifier}"] = summary[f"num_microbial_{classifier}"]/summary["total"]
+    summary[f"prop_unclassified_{classifier}"] = summary[f"num_unclassified_{classifier}"]/summary["total"]
 
     return summary
 
 def add_host_counts_to_summary(df, summary, classifier, prefix):
     df_host = df[df["classification"] == "human"]
-    if classifier != "charon":
-        df_host = df[df[classifier] == "human"]
     host_total = df_host.shape[0]
 
     #5. Of the host reads, what proportion map back to the host reference genome, or EBV (minimap2 T2T+EBV)?
@@ -279,8 +263,6 @@ def add_host_counts_to_summary(df, summary, classifier, prefix):
 
 def add_microbial_counts_to_summary(df, summary, classifier, prefix):
     df_microbial = df[df["classification"] == "microbial"]
-    if classifier != "charon":
-        df_microbial = df[df[classifier] == "microbial"]
     microbial_total = df_microbial.shape[0]
 
     #6. Of the microbial reads, what proportion map back to the host reference genome, or EBV?
@@ -356,10 +338,10 @@ def add_unclassified_to_summary(df, summary):
     unclassified_total = df_unclassified.shape[0]
 
     for column in ["length","mean_quality","confidence",'microbial_num_hits', 'microbial_prop','microbial_unique_prop', 'human_num_hits', 'human_prop', 'human_unique_prop']:
-        summary[f"mean_{column}_unclassified_charon"] = df_unclassified[column].mean()
-        summary[f"median_{column}_unclassified_charon"] = df_unclassified[column].median()
-        summary[f"max_{column}_unclassified_charon"] = df_unclassified[column].max()
-        summary[f"min_{column}_unclassified_charon"] = df_unclassified[column].min()
+        summary[f"mean_{column}_unclassified"] = df_unclassified[column].mean()
+        summary[f"median_{column}_unclassified"] = df_unclassified[column].median()
+        summary[f"max_{column}_unclassified"] = df_unclassified[column].max()
+        summary[f"min_{column}_unclassified"] = df_unclassified[column].min()
 
 def generate_summary(df, prefix, others=[]):
     sys.stderr.write("GENERATE SUMMARY\n")
@@ -388,13 +370,7 @@ def main():
         "-i",
         dest="input",
         required=True,
-        help="TSV output by charon",
-    )
-    parser.add_argument(
-        "--additional",
-        dest="additional",
-        required=False,
-        help="Additional TSV for another classifier",
+        help="TSV output from classifier",
     )
     parser.add_argument(
         "-p",
@@ -440,26 +416,25 @@ def main():
         combined_df.to_csv("combined_df.csv")
         assert combined_df.shape[0] == mapped_df.shape[0], "The number of rows in the combined dataframe does not match the mapped dataframe."
 
-        charon_df = load_charon_output(args.input)
-        if args.additional:
-            charon_df = load_tsv_output(args.additional, "deacon", charon_df)
+        classifier, classifier_df = load_output(args.input)
 
-        sys.stderr.write("COMBINE CHARON AND MAPPING DATA\n")
-        charon_df.set_index("read_id")
-        old_size = charon_df.shape[0]
-        charon_df = charon_df.merge(combined_df, how="left")
-        assert charon_df.shape[0] == old_size, "The number of rows in the charon dataframe changed when combined with mapping dataframe."
+        sys.stderr.write("COMBINE CLASSIFIER AND MAPPING DATA\n")
+        classifier_df.set_index("read_id")
+        old_size = classifier_df.shape[0]
+        classifier_df = classifier_df.merge(combined_df, how="left")
+        assert classifier_df.shape[0] == old_size, "The number of rows in the charon dataframe changed when combined with mapping dataframe."
         
-        charon_df['ref_name'] = charon_df['ref_name'].fillna("")
-        charon_df["unmapped"] = charon_df["mapped_length"].isna()
+        classifier_df['ref_name'] = classifier_df['ref_name'].fillna("")
+        classifier_df["unmapped"] = classifier_df["mapped_length"].isna()
 
-        charon_df["sample_id"] = args.input.split("/")[-1].split(".")[0]
-        charon_df.to_csv(full_file, index=False)
+        classifier_df["sample_id"] = args.input.split("/")[-1].split(".")[0]
+        classifier_df.to_csv(full_file, index=False)
     else:
-        charon_df = pd.read_csv(full_file, index_col=None)
-        charon_df['classification'] = charon_df['classification'].fillna("")
+        classifier_df = pd.read_csv(full_file, index_col=None)
+        classifier = full_file.split("_full.csv")[0].split("_")[-1]
+        classifier_df['classification'] = classifier_df['classification'].fillna("")
 
-    summary = generate_summary(charon_df, args.prefix, others=["deacon"])
+    summary = generate_summary(classifier_df, args.prefix, classifier)
 
     # Save to CSV
     fieldnames = ["sample_id"] + list(summary.keys())
