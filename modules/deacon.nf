@@ -48,7 +48,7 @@ process collect_classifications {
     tuple val(unique_id), path(microbial_fastq), path(host_fastq)
 
     output:
-    tuple val(unique_id), path("${unique_id}_deacon.out"),  emit: result
+    tuple val(unique_id), val("deacon"), path("${unique_id}_deacon.out"),  emit: result
 
     script:
     """
