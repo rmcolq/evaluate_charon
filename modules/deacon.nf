@@ -42,27 +42,27 @@ process collect_classifications {
     label "process_low"
     container 'community.wave.seqera.io/library/deacon:0.5.0--5e06f862e47bcb8a'
 
-    publishDir "${params.outdir}/${unique_id}/intermediate/", mode: 'copy', pattern: "*.out"
+    publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
 
     input:
     tuple val(unique_id), path(microbial_fastq), path(host_fastq)
 
     output:
-    tuple val(unique_id), val("deacon"), path("${unique_id}_deacon.out"),  emit: result
+    tuple val(unique_id), val("deacon"), path("${unique_id}.deacon.out"),  emit: result
 
     script:
     """
     cat ${host_fastq}  | gunzip | awk 'NR%4==1 {print substr(\$1,2)}' > list_host
     cat ${microbial_fastq}  | gunzip | awk 'NR%4==1 {print substr(\$1,2)}' > list_microbial
-    echo -e "read_id\tclassification" > "${unique_id}_deacon.out"
+    echo -e "read_id\tclassification" > "${unique_id}.deacon.out"
     for id in \$(cat list_microbial)
       do
         echo -e "\$id\tmicrobial"
-      done >> "${unique_id}_deacon.out"
+      done >> "${unique_id}.deacon.out"
     for id in \$(cat list_host)
       do
         echo -e "\$id\thuman"
-      done >> "${unique_id}_deacon.out"
+      done >> "${unique_id}.deacon.out"
     """
 }
 

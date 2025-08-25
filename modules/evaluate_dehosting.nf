@@ -1,6 +1,6 @@
 include { evaluate_charon } from '../modules/charon'
 include { evaluate_deacon } from '../modules/deacon'
-include { cat_host_sam_files; cat_microbial_sam_files; evaluate_summary } from '../modules/utils'
+include { evaluate_summary } from '../modules/utils'
 
 
 

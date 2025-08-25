@@ -104,7 +104,7 @@ def load_blast_info(blast_results):
     processed_ids = set()
     sys.stderr.write("LOAD BLAST INFO FROM: " + blast_results + "\n")
     if (os.path.getsize(blast_results) > 0):
-        default_ = {"read_id":None, "taxids":[], "names":[], "human_accs":[], "human":False, "pident":0, "top_hit":None}
+        default_ = {"read_id":None, "taxids":[], "names":[], "human_accs":[], "blast_human":False, "pident":0, "top_hit":None}
         details = defaultdict(lambda:copy.deepcopy(default_))
         with open(blast_results, 'r') as f:
             for line in f:
@@ -126,7 +126,7 @@ def load_blast_info(blast_results):
                     details[qseqid]["names"].append(sscinames)
                     details[qseqid]["read_id"] = qseqid
                     if staxids == "9606":
-                        details[qseqid]["human"] = True
+                        details[qseqid]["blast_human"] = True
                         details[qseqid]["human_accs"].append(f"{sacc}:{sstart}-{send}")
                         details[qseqid]["pident"] = float(pident)
         for qseqid in details:
@@ -135,7 +135,7 @@ def load_blast_info(blast_results):
             details[qseqid]["human_accs"] = ";".join(list(set(details[qseqid]["human_accs"])))
         df = pd.DataFrame(details.values())
     else:
-        columns = ["read_id", "taxids", "names", "human_accs", "human", "pident"]
+        columns = ["read_id", "taxids", "names", "human_accs", "blast_human", "pident"]
         df = pd.DataFrame(columns=columns)
     df.set_index("read_id")
     sys.stderr.write("Found " + str(df.shape)  + " entries\n")
@@ -208,8 +208,8 @@ def add_classified_counts_to_summary(df, summary, classifier):
     #1. How many host, microbial, unclassified reads were there for charon?
     g = df.groupby(["status","classification"]).count()
 
-    if ("C","human") in g["read_id"].index:
-        summary[f"num_host_{classifier}"] = g["read_id"]["C"]["human"]
+    if ("C","blast_human") in g["read_id"].index:
+        summary[f"num_host_{classifier}"] = g["read_id"]["C"]["blast_human"]
     else:
         summary[f"num_host_{classifier}"] = 0
 
@@ -234,7 +234,7 @@ def add_classified_counts_to_summary(df, summary, classifier):
     return summary
 
 def add_host_counts_to_summary(df, summary, classifier, prefix):
-    df_host = df[df["classification"] == "human"]
+    df_host = df[df["classification"] == "blast_human"]
     host_total = df_host.shape[0]
 
     #5. Of the host reads, what proportion map back to the host reference genome, or EBV (minimap2 T2T+EBV)?
@@ -257,7 +257,7 @@ def add_host_counts_to_summary(df, summary, classifier, prefix):
         summary[f"prop_host_map_ebv_{classifier}"] = 0
         summary[f"prop_host_map_host_{classifier}"] = 0
 
-    data_file = Path(f"{prefix}_{classifier}_host_data.csv")
+    data_file = Path(f"{prefix}_host_data.csv")
     host_host_df.to_csv(data_file, index=False)
     return
 
@@ -276,7 +276,7 @@ def add_microbial_counts_to_summary(df, summary, classifier, prefix):
     microbial_host_df = df_microbial[~df_microbial["ref"].isin(ebv_accs + other_accs)]
     summary[f"num_microbial_map_host_{classifier}"] = microbial_host_df.shape[0]
 
-    microbial_host_verified_df = microbial_host_df[microbial_host_df["human"]==True]
+    microbial_host_verified_df = microbial_host_df[microbial_host_df["blast_human"]==True]
     summary[f"num_microbial_map_host_verified_{classifier}"] = microbial_host_verified_df.shape[0]
 
     if microbial_total > 0:
@@ -290,19 +290,19 @@ def add_microbial_counts_to_summary(df, summary, classifier, prefix):
         summary[f"prop_microbial_map_host_{classifier}"] = 0
         summary[f"prop_microbial_map_host_verified_{classifier}"] = 0
 
-    data_file = Path(f"{prefix}_{classifier}_microbial_data.csv")
+    data_file = Path(f"{prefix}_microbial_data.csv")
     microbial_host_df.to_csv(data_file, index=False)
     return microbial_host_df
 
 def check_related_taxa(microbial_host_df, classifier, prefix):
     #7. For reads which classify as microbial and minimap to host but do not have a blast human result, what taxa does blast return
     related_taxa = set()
-    microbial_host_unverified_ids = microbial_host_df[microbial_host_df["human"]==False]["taxids"]
+    microbial_host_unverified_ids = microbial_host_df[microbial_host_df["blast_human"]==False]["taxids"]
     for i in microbial_host_unverified_ids:
         related_taxa.update(i.split(";"))
 
     if len(related_taxa) > 0:
-        taxa_file = Path(f"{prefix}_{classifier}_related_taxa.csv")
+        taxa_file = Path(f"{prefix}_related_taxa.csv")
         with open(taxa_file, "w") as f:
             species_ids = []
             species_names = []
@@ -322,12 +322,12 @@ def check_related_taxa(microbial_host_df, classifier, prefix):
 def check_human_accs(microbial_host_df, classifier, prefix):
     #8. For reads which classify as microbial and map to host and have a blast human result, what human accessions
     human_accs = set()
-    microbial_host_verified_accs = microbial_host_df[microbial_host_df["human"]==True]["human_accs"]
+    microbial_host_verified_accs = microbial_host_df[microbial_host_df["blast_human"]==True]["human_accs"]
     for i in microbial_host_verified_accs:
         human_accs.update(i.split(";"))
 
     if len(human_accs) > 0:
-        accs_file = Path(f"{prefix}_{classifier}_human_accs.csv")
+        accs_file = Path(f"{prefix}_human_accs.csv")
         with open(accs_file, "w") as f:
             f.write(",".join(human_accs))
         sys.stderr.write(f"Found human accessions which are classified as microbial for classifier {classifier}:\n{human_accs}\n")
@@ -343,21 +343,20 @@ def add_unclassified_to_summary(df, summary):
         summary[f"max_{column}_unclassified"] = df_unclassified[column].max()
         summary[f"min_{column}_unclassified"] = df_unclassified[column].min()
 
-def generate_summary(df, prefix, others=[]):
+def generate_summary(df, prefix, classifier):
     sys.stderr.write("GENERATE SUMMARY\n")
     summary = {}
 
-    add_classified_counts_to_summary(df, summary, others=others)
+    add_classified_counts_to_summary(df, summary, classifier)
 
-    for classifier in ["charon"] + others:
-        add_host_counts_to_summary(df, summary, classifier, prefix)
+    add_host_counts_to_summary(df, summary, classifier, prefix)
 
-        microbial_host_df = add_microbial_counts_to_summary(df, summary, classifier, prefix)
-        check_related_taxa(microbial_host_df, classifier, prefix)
-        check_human_accs(microbial_host_df, classifier, prefix)
+    microbial_host_df = add_microbial_counts_to_summary(df, summary, classifier, prefix)
+    check_related_taxa(microbial_host_df, classifier, prefix)
+    check_human_accs(microbial_host_df, classifier, prefix)
 
-        if classifier == "charon":
-            add_unclassified_to_summary(df, summary)
+    if classifier == "charon":
+        add_unclassified_to_summary(df, summary)
 
     return summary
 

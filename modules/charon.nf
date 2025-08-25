@@ -1,13 +1,13 @@
 #!/usr/bin/env nextflow
 include { minimap2_microbial; minimap2_host; verify_microbial_host_hits } from '../modules/utils'
 
-process run_charon {
+process run_charon_chunk {
 
-    label "process_medium"
+    label "process_medium_plus_mem"
     container 'docker.io/rmcolq/charon:v1.0.5'
     maxForks 4
 
-    publishDir "${params.outdir}/${unique_id}/intermediate/", mode: 'copy', pattern: "*.out"
+    publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
 
 
     input:
@@ -15,9 +15,9 @@ process run_charon {
     path(db)
 
     output:
-    tuple val(unique_id), val("charon"), path("charon_${unique_id}_microbial.f*q.gz"), emit: microbial_fastq
-    tuple val(unique_id), val("charon"), path("charon_${unique_id}_human.f*q.gz"), emit: human_fastq
-    tuple val(unique_id), val("charon"), path("${unique_id}_charon.out"),  emit: result
+    tuple val(unique_id), path("${fastq.baseName}_microbial.f*q.gz"), emit: microbial_fastq
+    tuple val(unique_id), path("${fastq.baseName}_human.f*q.gz"), emit: human_fastq
+    tuple val(unique_id), path("${unique_id}_charon.out"),  emit: result
 
     script:
     """
@@ -26,24 +26,71 @@ process run_charon {
       --confidence 7 \
       --log charon_${unique_id}.log \
       --extract all \
-      --prefix charon_${unique_id} \
+      --prefix ${fastq.baseName} \
       -t ${task.cpus} \
       > ${unique_id}_charon.out
 
     """
 }
 
-process compress {
+process cat_all_microbial_files {
+
+    label "process_low"
+    container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
+
     input:
-    tuple val(unique_id), val(method), path(fastq)
+    tuple val(unique_id), path(fastq_files)
 
     output:
-    tuple val(unique_id), val(method), path("${fastq}.gz")
+    tuple val(unique_id), val("charon"), path("charon_${unique_id}_microbial.f*q.gz")
 
     script:
     """
-    gzip -c ${fastq} > "${fastq}.gz"
+    cat \$(ls *.f*q*) >> "charon_${unique_id}_microbial.f*q.gz"
     """
+}
+
+process cat_all_human_files {
+
+    label "process_low"
+    container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
+
+    input:
+    tuple val(unique_id), path(fastq_files)
+
+    output:
+    tuple val(unique_id), val("charon"), path("charon_${unique_id}_human.f*q.gz")
+
+    script:
+    """
+    cat \$(ls *.f*q*) >> "charon_${unique_id}_human.f*q.gz"
+    """
+}
+
+workflow run_charon {
+    take:
+    fastq_ch
+    db
+
+    main:
+    fastq_ch.map{unique_id, fastq -> [unique_id, fastq.splitFastq(by: params.chunk_size, file:true, compress:true)]}
+            .transpose()
+            .set{chunked_fastq_ch}
+
+    run_charon_chunk(chunked_fastq_ch, db)
+    
+    run_charon_chunk.out.microbial_fastq.groupTuple() | cat_all_microbial_files | set{ microbial_fastq }
+
+    run_charon_chunk.out.human_fastq.groupTuple() | cat_all_human_files | set{ human_fastq }
+
+    run_charon_chunk.out.result.collectFile{ unique_id, result -> ["${unique_id}.charon.out", result.text]}
+                                      .map { f -> [f.simpleName, "charon", f] }
+                                      .set{ result }
+    
+    emit:
+    microbial_fastq
+    human_fastq
+    result
 }
 
 workflow evaluate_charon {
