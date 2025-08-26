@@ -73,7 +73,7 @@ workflow run_charon {
     db
 
     main:
-    fastq_ch.map{unique_id, fastq -> [unique_id, fastq.splitFastq(by: params.chunk_size, file:true, compress:true)]}
+    fastq_ch.map{unique_id, fastq -> [unique_id, fastq.splitFastq(by: params.charon_chunk_size, file:true, compress:true)]}
             .transpose()
             .set{chunked_fastq_ch}
 
