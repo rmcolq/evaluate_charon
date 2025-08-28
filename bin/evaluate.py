@@ -200,7 +200,7 @@ def load_output(path):
     if "charon" in path:
         return "charon", load_charon_output(path)
     else:
-        classifier = path.split(".out")[0].split("_")[-1]   
+        classifier = path.split(".")[-2]
         return classifier, load_tsv_output(path, classifier)
     
 
@@ -208,8 +208,8 @@ def add_classified_counts_to_summary(df, summary, classifier):
     #1. How many host, microbial, unclassified reads were there for charon?
     g = df.groupby(["status","classification"]).count()
 
-    if ("C","blast_human") in g["read_id"].index:
-        summary[f"num_host_{classifier}"] = g["read_id"]["C"]["blast_human"]
+    if ("C","human") in g["read_id"].index:
+        summary[f"num_host_{classifier}"] = g["read_id"]["C"]["human"]
     else:
         summary[f"num_host_{classifier}"] = 0
 
@@ -234,7 +234,7 @@ def add_classified_counts_to_summary(df, summary, classifier):
     return summary
 
 def add_host_counts_to_summary(df, summary, classifier, prefix):
-    df_host = df[df["classification"] == "blast_human"]
+    df_host = df[df["classification"] == "human"]
     host_total = df_host.shape[0]
 
     #5. Of the host reads, what proportion map back to the host reference genome, or EBV (minimap2 T2T+EBV)?
