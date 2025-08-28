@@ -380,19 +380,19 @@ def main():
     parser.add_argument(
         "--host_sam",
         dest="host_sam",
-        required=True,
+        required=False,
         help="SAM file of mapping results from host-extracted file",
     )
     parser.add_argument(
         "--microbial_sam",
         dest="microbial_sam",
-        required=True,
+        required=False,
         help="SAM file of mapping results from microbial-extracted file",
     )
     parser.add_argument(
         "--blast_result",
         dest="blast_result",
-        required=True,
+        required=False,
         help="TAB separated result from blastn showing top blast hits for microbial reads which map to T2T reference",
     )
 
@@ -405,6 +405,10 @@ def main():
 
     full_file = Path(args.prefix + "_full.csv")
     if not full_file.is_file():
+        if args.host_sam is None or args.microbial_sam is None or args.blast_result is None:
+            sys.stderr.write("If the full CSV file does not exist, then --host_sam, --microbial_sam and --blast_result must be provided\n")
+            sys.exit(1)
+            
         mapped_df = load_both_sam(args.host_sam, args.microbial_sam)
         mapped_df.to_csv("mapped_df.csv")
 
