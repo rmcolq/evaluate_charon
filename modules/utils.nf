@@ -76,7 +76,7 @@ process minimap2_host {
     conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
 
-    //publishDir "${params.outdir}/intermediate/", mode: 'copy', pattern: "*.sam"
+    publishDir "${params.outdir}/intermediate/", mode: 'copy', pattern: "*.sam"
 
     input:
         tuple val(unique_id), val(method), path(fastq)
@@ -163,7 +163,7 @@ process cat_all_microbial_sam_files {
 
     label "process_low"
     container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
-    //publishDir "${params.outdir}/intermediate/", mode: 'copy', pattern: "*.sam"
+    publishDir "${params.outdir}/intermediate/", mode: 'copy', pattern: "*.sam"
 
     input:
     tuple val(unique_id), val(method), path(sam_files)
@@ -197,7 +197,7 @@ workflow verify_microbial_host_hits {
             blast_db = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true) // any file will do to not block
 
         blastn_microbial_host_hits(extract_microbial_host_hits.out, blast_db)
-        blastn_microbial_host_hits.out.collectFile { unique_id, method, result -> ["${unique_id}.${method}.results_blastn.txt", result.text]}
+        blastn_microbial_host_hits.out.collectFile (storeDir: "${params.outdir}/intermediate") { unique_id, method, result -> ["${unique_id}.${method}.results_blastn.txt", result.text]}
                                       .map { f -> [f.simpleName, f] }
                                       .set{ blast_ch }
 
