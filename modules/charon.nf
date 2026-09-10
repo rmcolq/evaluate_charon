@@ -3,7 +3,7 @@ include { minimap2_microbial; minimap2_host; verify_microbial_host_hits } from '
 
 process run_charon_chunk {
 
-    label "process_medium_plus_mem"
+    label "process_long"
     container 'docker.io/rmcolq/charon:v1.0.5'
     maxForks 4
 

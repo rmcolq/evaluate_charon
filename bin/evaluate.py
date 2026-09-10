@@ -434,7 +434,7 @@ def main():
         classifier_df.to_csv(full_file, index=False)
     else:
         classifier_df = pd.read_csv(full_file, index_col=None)
-        classifier = full_file.split("_full.csv")[0].split("_")[-1]
+        classifier = str(full_file).split("_full.csv")[0].split("_")[-1]
         classifier_df['classification'] = classifier_df['classification'].fillna("")
 
     summary = generate_summary(classifier_df, args.prefix, classifier)

@@ -17,7 +17,8 @@ process download_nohuman_index {
 }
 process run_nohuman {
 
-    label "process_medium"
+    label "process_medium_plus_mem"
+    label "process_long"
     container 'community.wave.seqera.io/library/nohuman:0.4.0--c0e60dcf9c349883'
     maxForks 2
 
