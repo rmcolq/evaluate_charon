@@ -4,7 +4,7 @@ include { minimap2_microbial; minimap2_host; verify_microbial_host_hits } from '
 process download_nohuman_index {
     label "process_single"
     storeDir "${params.store_dir}/nohuman/"
-    container 'community.wave.seqera.io/library/nohuman:0.4.0--c0e60dcf9c349883'
+    container 'community.wave.seqera.io/library/nohuman:0.5.1--69df84d3602dde50'
     maxForks 1
 
     output:
@@ -12,14 +12,14 @@ process download_nohuman_index {
 
     script:
     """
-    nohuman -d --db nohuman_v0.4.0.idx
+    nohuman --download --db-version HPRC.r2 --db nohuman_v0.5.1.idx
     """
 }
 process run_nohuman {
 
     label "process_medium_plus_mem"
     label "process_long"
-    container 'community.wave.seqera.io/library/nohuman:0.4.0--c0e60dcf9c349883'
+    container 'community.wave.seqera.io/library/nohuman:0.5.1--69df84d3602dde50'
     maxForks 2
 
     input:
@@ -41,7 +41,7 @@ process run_nohuman {
 process collect_classifications {
 
     label "process_low"
-    container 'community.wave.seqera.io/library/deacon:0.5.0--5e06f862e47bcb8a'
+    container 'community.wave.seqera.io/library/nohuman:0.5.1--69df84d3602dde50'
 
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
 
