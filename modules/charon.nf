@@ -1,10 +1,42 @@
 #!/usr/bin/env nextflow
 include { minimap2_microbial; minimap2_host; verify_microbial_host_hits } from '../modules/utils'
 
+process run_charon {
+
+    label "process_long"
+    container 'docker.io/rmcolq/charon:v1.1.1'
+    maxForks 4
+
+    publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
+
+
+    input:
+    tuple val(unique_id), path(fastq)
+    path(db)
+
+    output:
+    tuple val(unique_id), path("${fastq.baseName}_microbial.f*q.gz"), emit: microbial_fastq
+    tuple val(unique_id), path("${fastq.baseName}_human.f*q.gz"), emit: human_fastq
+    tuple val(unique_id), path("${unique_id}_charon.out"),  emit: result
+
+    script:
+    """
+    charon dehost ${fastq} \
+      --db ${db} \
+      --confidence 7 \
+      --log charon_${unique_id}.log \
+      --extract all \
+      --prefix charon_${unique_id} \
+      -t ${task.cpus} \
+      > ${unique_id}.charon.out
+
+    """
+}
+
 process run_charon_chunk {
 
     label "process_long"
-    container 'docker.io/rmcolq/charon:v1.0.5'
+    container 'docker.io/rmcolq/charon:v1.1.1'
     maxForks 4
 
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
@@ -67,7 +99,7 @@ process cat_all_human_files {
     """
 }
 
-workflow run_charon {
+workflow run_charon_in_chunks {
     take:
     fastq_ch
     db
