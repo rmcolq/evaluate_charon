@@ -1,189 +1,129 @@
 #!/usr/bin/env nextflow
+include { minimap2_microbial; minimap2_host; verify_microbial_host_hits } from '../modules/utils'
 
-process bam_to_fastq {
-    label "process_medium"
-    conda "bioconda::samtools=1.21"
-    container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
-
-    input:
-    tuple val(unique_id), path(bam)
-
-    output:
-    tuple val(unique_id), path("${bam.baseName}.fastq")
-
-    script:
-    """
-    samtools fastq ${bam} > "${bam.baseName}.fastq"
-    """
-}
 process run_charon {
 
-    label "process_medium_plus_mem"
-    container 'docker.io/rmcolq/charon:v1.0.5'
+    label "process_long"
+    container 'docker.io/rmcolq/charon:v1.1.1'
+    maxForks 4
+
+    publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
+
 
     input:
     tuple val(unique_id), path(fastq)
     path(db)
 
     output:
-    tuple val(unique_id), path("charon_${unique_id}_microbial.f*q.gz"), emit: microbial_fastq
-    tuple val(unique_id), path("charon_${unique_id}_human.f*q.gz"), emit: human_fastq
-    tuple val(unique_id), path("charon_${unique_id}.out"),  emit: result
+    tuple val(unique_id), path("${fastq.baseName}_microbial.f*q.gz"), emit: microbial_fastq
+    tuple val(unique_id), path("${fastq.baseName}_human.f*q.gz"), emit: human_fastq
+    tuple val(unique_id), path("${unique_id}_charon.out"),  emit: result
 
     script:
     """
     charon dehost ${fastq} \
       --db ${db} \
+      --confidence 7 \
       --log charon_${unique_id}.log \
       --extract all \
       --prefix charon_${unique_id} \
       -t ${task.cpus} \
-      --min_length 20 > charon_${unique_id}.out
+      > ${unique_id}.charon.out
+
     """
 }
 
-process minimap2_microbial {
+process run_charon_chunk {
 
-    label "process_medium"
+    label "process_long"
+    container 'docker.io/rmcolq/charon:v1.1.1'
+    maxForks 4
 
-    conda "bioconda::minimap2=2.28"
-    container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
+    publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
 
-    input:
-        tuple val(unique_id), val(fastq)
-        path refs
-    output:
-        tuple val(unique_id), path("microbial.mmp.sam")
-    script:
-        if ( params.evaluate_microbial ) {
-            preset = ""
-            if ( params.read_type == "illumina") {
-                preset = "sr"
-            } else {
-                preset = "map-ont"
-            }
-            """
-            minimap2 -ax ${preset} ${refs} ${fastq} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > microbial.mmp.sam
-            """
-        } else {
-            """
-            touch "microbial.mmp.sam"
-            """
-        }
-        
-}
-
-process minimap2_host {
-
-    label "process_medium"
-
-    conda "bioconda::minimap2=2.28"
-    container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
 
     input:
-        tuple val(unique_id), val(fastq)
-        path refs
+    tuple val(unique_id), path(fastq)
+    path(db)
+
     output:
-        tuple val(unique_id), path("host.mmp.sam")
+    tuple val(unique_id), path("${fastq.baseName}_microbial.f*q.gz"), emit: microbial_fastq
+    tuple val(unique_id), path("${fastq.baseName}_human.f*q.gz"), emit: human_fastq
+    tuple val(unique_id), path("${unique_id}_charon.out"),  emit: result
+
     script:
-        if ( params.evaluate_host == true ) {
-            preset = ""
-            if ( params.read_type == "illumina") {
-                preset = "sr"
-            } else {
-                preset = "map-ont"
-            }
-            """
-            minimap2 -ax ${preset} ${refs} ${fastq} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > host.mmp.sam
-            """
-        } else {
-            """
-            touch "host.mmp.sam"
-            """
-        }
+    """
+    charon dehost ${fastq} \
+      --db ${db} \
+      --confidence 7 \
+      --log charon_${unique_id}.log \
+      --extract all \
+      --prefix ${fastq.baseName} \
+      -t ${task.cpus} \
+      > ${unique_id}_charon.out
+
+    """
 }
 
-process extract_microbial_host_hits {
+process cat_all_microbial_files {
 
-    label "process_medium"
-    conda "bioconda::samtools=1.21"
+    label "process_low"
     container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
 
     input:
-    tuple val(unique_id), path(sam_file)
-    path ref_bed
+    tuple val(unique_id), path(fastq_files)
 
     output:
-    tuple val(unique_id), path("query.fasta")
+    tuple val(unique_id), val("charon"), path("charon_${unique_id}_microbial.f*q.gz")
 
     script:
     """
-    samtools view -S -b ${sam_file} | samtools sort - -o ${sam_file.baseName}.sorted.bam
-    samtools index ${sam_file.baseName}.sorted.bam
-    samtools view -L ${ref_bed} ${sam_file.baseName}.sorted.bam -b -o out.bam
-    samtools fasta out.bam > "query.fasta"
+    cat \$(ls *.f*q*) >> "charon_${unique_id}_microbial.f*q.gz"
     """
 }
 
-process blastn_microbial_host_hits {
+process cat_all_human_files {
 
-    label "process_medium"
-    conda "bioconda::blast=2.16.0"
-    container "ncbi/blast"
+    label "process_low"
+    container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
 
     input:
-    tuple val(unique_id), path(fasta_file)
-    path(blast_db)
+    tuple val(unique_id), path(fastq_files)
 
     output:
-    tuple val(unique_id), path("results_blastn.txt")
-
-    script:
-    if (params.blast_db){
-        db = "${blast_db}/nt -num_threads 4"
-    } else {
-        db = "nt -remote"
-    }
-    """
-    if [ -s ${fasta_file} ]; then
-      blastn -query ${fasta_file} \
-        -db ${db} \
-        -out results_blastn.txt \
-        -evalue 1e-6 \
-        -perc_identity 90 \
-        -outfmt "6 qseqid sacc sscinames staxids sstart send evalue pident length"
-    else
-      touch "results_blastn.txt"
-    fi
-    """
-}
-
-process evaluate_summary {
-
-    container 'community.wave.seqera.io/library/simplesam_numpy_pandas_pip_taxoniq:3af1649bdaf86fca'
-    publishDir "${params.outdir}/${unique_id}/", mode: 'copy'
-
-    input:
-    tuple val(unique_id), path(charon_report), path(host_sam), path(microbial_sam), path(blast_result)
-
-    output:
-    path "${unique_id}_summary.csv", emit: summary
-    path "${unique_id}_full.csv", emit: full
-    path "${unique_id}*_data.csv", emit: data
-    path "${unique_id}*_taxa.csv", emit: taxa, optional:true
-    path "${unique_id}*_accs.csv", emit: accs, optional:true
+    tuple val(unique_id), val("charon"), path("charon_${unique_id}_human.f*q.gz")
 
     script:
     """
-    evaluate.py \
-      -i ${charon_report} \
-      --microbial_sam ${microbial_sam} \
-      --host_sam ${host_sam} \
-      --blast_result ${blast_result} \
-      -p "${unique_id}"
+    cat \$(ls *.f*q*) >> "charon_${unique_id}_human.f*q.gz"
     """
 }
 
+workflow run_charon_in_chunks {
+    take:
+    fastq_ch
+    db
+
+    main:
+    fastq_ch.map{unique_id, fastq -> [unique_id, fastq.splitFastq(by: params.charon_chunk_size, file:true, compress:true)]}
+            .transpose()
+            .set{chunked_fastq_ch}
+
+    run_charon_chunk(chunked_fastq_ch, db)
+    
+    run_charon_chunk.out.microbial_fastq.groupTuple() | cat_all_microbial_files | set{ microbial_fastq }
+
+    run_charon_chunk.out.human_fastq.groupTuple() | cat_all_human_files | set{ human_fastq }
+
+    run_charon_chunk.out.result.collectFile{ unique_id, result -> ["${unique_id}.charon.out", result.text]}
+                                      .map { f -> [f.simpleName, "charon", f] }
+                                      .set{ result }
+    
+    emit:
+    microbial_fastq
+    human_fastq
+    result
+}
 
 workflow evaluate_charon {
     take:
@@ -198,25 +138,18 @@ workflow evaluate_charon {
     minimap2_host(run_charon.out.human_fastq, refs)
 
     if ( params.evaluate_microbial ){
-        blast_ch = Channel.empty()
-        ref_bed = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true)
-        extract_microbial_host_hits(minimap2_microbial.out, ref_bed)
-        if (params.blast_db)
-            blast_db = file(params.blast_db, type: "dir", checkIfExists:true)
-        else
-            blast_db = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true) // any file will do to not block
-        blastn_microbial_host_hits(extract_microbial_host_hits.out, blast_db)
-        blastn_microbial_host_hits.out.set{ blast_ch }
+        verify_microbial_host_hits(minimap2_microbial.out.chunk_sam_ch)
+        verify_microbial_host_hits.out.set{ blast_ch }
     } else {
         blast_ch = Channel.empty()
     }
 
-    run_charon.out.result
-             .combine(minimap2_host.out, by: 0)
-             .combine(minimap2_microbial.out, by: 0)
-             .combine(blast_ch, by: 0)
-             .set{ eval_ch }
 
-    evaluate_summary(eval_ch)
+    emit:
+    report = run_charon.out.result
+    microbial_sam = minimap2_microbial.out.sam_ch
+    host_sam = minimap2_host.out
+    blast = blast_ch
+
 
 }
