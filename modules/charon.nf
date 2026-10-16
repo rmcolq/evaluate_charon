@@ -3,8 +3,10 @@ include { minimap2_microbial; minimap2_host; verify_microbial_host_hits } from '
 
 process run_charon {
 
+    label "process_medium_plus_mem"
     label "process_long"
-    container 'docker.io/rmcolq/charon:v1.1.1'
+    tag "${unique_id}"
+    container 'docker.io/rmcolq/charon:v1.1.2'
     maxForks 4
 
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
@@ -15,9 +17,9 @@ process run_charon {
     path(db)
 
     output:
-    tuple val(unique_id), path("${fastq.baseName}_microbial.f*q.gz"), emit: microbial_fastq
-    tuple val(unique_id), path("${fastq.baseName}_human.f*q.gz"), emit: human_fastq
-    tuple val(unique_id), path("${unique_id}_charon.out"),  emit: result
+    tuple val(unique_id), val("charon"), path("${fastq.baseName}_microbial.f*q.gz"), emit: microbial_fastq
+    tuple val(unique_id), val("charon"), path("${fastq.baseName}_human.f*q.gz"), emit: human_fastq
+    tuple val(unique_id), val("charon"), path("${unique_id}_charon.out"),  emit: result
 
     script:
     """
@@ -26,17 +28,19 @@ process run_charon {
       --confidence 7 \
       --log charon_${unique_id}.log \
       --extract all \
-      --prefix charon_${unique_id} \
+      --prefix ${fastq.baseName} \
       -t ${task.cpus} \
-      > ${unique_id}.charon.out
+      --max-memory ${(task.memory.toGiga() * 0.8) as int} \
+      > ${unique_id}_charon.out
 
     """
 }
 
 process run_charon_chunk {
 
+    label "process_medium_plus_mem"
     label "process_long"
-    container 'docker.io/rmcolq/charon:v1.1.1'
+    container 'docker.io/rmcolq/charon:v1.1.2'
     maxForks 4
 
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
@@ -60,6 +64,7 @@ process run_charon_chunk {
       --extract all \
       --prefix ${fastq.baseName} \
       -t ${task.cpus} \
+      --max-memory ${(task.memory.toGiga() * 0.8) as int} \
       > ${unique_id}_charon.out
 
     """
@@ -74,11 +79,12 @@ process cat_all_microbial_files {
     tuple val(unique_id), path(fastq_files)
 
     output:
-    tuple val(unique_id), val("charon"), path("charon_${unique_id}_microbial.f*q.gz")
+    tuple val(unique_id), val("charon"), path("charon_${unique_id}_microbial.fq.gz")
 
     script:
     """
-    cat \$(ls *.f*q*) >> "charon_${unique_id}_microbial.f*q.gz"
+    cat \$(ls *.f*q*) > combined.tmp
+    mv combined.tmp "charon_${unique_id}_microbial.fq.gz"
     """
 }
 
@@ -91,11 +97,12 @@ process cat_all_human_files {
     tuple val(unique_id), path(fastq_files)
 
     output:
-    tuple val(unique_id), val("charon"), path("charon_${unique_id}_human.f*q.gz")
+    tuple val(unique_id), val("charon"), path("charon_${unique_id}_human.fq.gz")
 
     script:
     """
-    cat \$(ls *.f*q*) >> "charon_${unique_id}_human.f*q.gz"
+    cat \$(ls *.f*q*) > combined.tmp
+    mv combined.tmp "charon_${unique_id}_human.fq.gz"
     """
 }
 

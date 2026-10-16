@@ -18,6 +18,7 @@ process download_deacon_index {
 process run_deacon {
 
     label "process_medium"
+    tag "${unique_id}"
     container 'community.wave.seqera.io/library/deacon:0.17.0--43cd5289edd1686c'
     maxForks 2
 
@@ -40,6 +41,7 @@ process run_deacon {
 process collect_classifications {
 
     label "process_low"
+    tag "${unique_id}"
     container 'community.wave.seqera.io/library/deacon:0.17.0--43cd5289edd1686c'
 
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"

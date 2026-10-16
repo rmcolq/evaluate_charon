@@ -2,8 +2,9 @@
 
 process bam_to_fastq {
     label "process_medium"
+    tag "${unique_id}"
     conda "bioconda::samtools=1.21"
-    container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
+    container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
     maxForks 2
 
     input:
@@ -18,9 +19,29 @@ process bam_to_fastq {
     """
 }
 
+process stage_fastq {
+    // Remote (e.g. s3://) inputs are downloaded by Nextflow into this task's work dir once,
+    // rather than separately by every classifier. Eager cleanup removes it after last use.
+    label "process_single"
+    tag "${unique_id}"
+    maxForks 2
+
+    input:
+    tuple val(unique_id), path(fastq)
+
+    output:
+    tuple val(unique_id), path("staged_${fastq}")
+
+    script:
+    """
+    mv ${fastq} staged_${fastq}
+    """
+}
+
 process minimap2_microbial_chunk {
 
     label "process_medium"
+    tag "${unique_id}"
 
     conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
@@ -43,7 +64,7 @@ process minimap2_microbial_chunk {
             """
         } else {
             """
-            touch "microbial.${method}.mmp.sam"
+            touch "microbial.${fastq.baseName}.mmp.sam"
             """
         }
         
@@ -72,6 +93,7 @@ workflow minimap2_microbial {
 process minimap2_host {
 
     label "process_medium"
+    tag "${unique_id}"
 
     conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
@@ -92,7 +114,8 @@ process minimap2_host {
                 preset = "map-ont"
             }
             """
-            head -n1000000 ${fastq} > small.fq
+            # head closes the pipe once it has enough reads, which gives zcat SIGPIPE (141) under pipefail
+            zcat -f ${fastq} | head -n ${params.host_eval_reads * 4} > small.fq || [ \$? -eq 141 ]
             minimap2 -ax ${preset} ${refs} small.fq --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > "${unique_id}.${method}.host.sam"
             """
         } else {
@@ -105,8 +128,9 @@ process minimap2_host {
 process extract_microbial_host_hits {
 
     label "process_medium"
+    tag "${unique_id}"
     conda "bioconda::samtools=1.21"
-    container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
+    container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
 
     input:
     tuple val(unique_id), val(method), path(sam_file)
@@ -127,6 +151,7 @@ process extract_microbial_host_hits {
 process blastn_microbial_host_hits {
 
     label "process_medium_plus_mem"
+    tag "${unique_id}"
     label "process_long"
     conda "bioconda::blast=2.16.0"
     container "ncbi/blast"
@@ -162,7 +187,8 @@ process blastn_microbial_host_hits {
 process cat_all_microbial_sam_files {
 
     label "process_low"
-    container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
+    tag "${unique_id}"
+    container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
     publishDir "${params.outdir}/intermediate/", mode: 'copy', pattern: "*.sam"
 
     input:
@@ -209,6 +235,7 @@ workflow verify_microbial_host_hits {
 process evaluate_summary {
 
     label "process_low"
+    tag "${unique_id}"
     container 'community.wave.seqera.io/library/simplesam_numpy_pandas_pip_taxoniq:3af1649bdaf86fca'
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy'
 
@@ -216,6 +243,7 @@ process evaluate_summary {
     tuple val(unique_id), val(classifier), path(report), path(host_sam), path(microbial_sam), path(blast_result)
 
     output:
+    tuple val(unique_id), val(classifier), emit: done
     path "${unique_id}*_summary.csv", emit: summary
     path "${unique_id}*_full.csv", emit: full
     path "${unique_id}*_data.csv", emit: data

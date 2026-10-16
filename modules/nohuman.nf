@@ -18,6 +18,7 @@ process download_nohuman_index {
 process run_nohuman {
 
     label "process_medium_plus_mem"
+    tag "${unique_id}"
     label "process_long"
     container 'community.wave.seqera.io/library/nohuman:0.5.1--69df84d3602dde50'
     maxForks 2
@@ -41,6 +42,7 @@ process run_nohuman {
 process collect_classifications {
 
     label "process_low"
+    tag "${unique_id}"
     container 'community.wave.seqera.io/library/nohuman:0.5.1--69df84d3602dde50'
 
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
