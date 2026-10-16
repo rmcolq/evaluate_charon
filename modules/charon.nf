@@ -73,7 +73,7 @@ process run_charon_chunk {
 process cat_all_microbial_files {
 
     label "process_low"
-    container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
+    container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
 
     input:
     tuple val(unique_id), path(fastq_files)
@@ -91,7 +91,7 @@ process cat_all_microbial_files {
 process cat_all_human_files {
 
     label "process_low"
-    container "community.wave.seqera.io/library/samtools:1.21--0d76da7c3cf7751c"
+    container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
 
     input:
     tuple val(unique_id), path(fastq_files)
