@@ -25,16 +25,19 @@ process run_deacon {
     input:
     tuple val(unique_id), path(fastq)
     path(deacon_index)
+    val(name)
+    val(extra_args)
 
     output:
-    tuple val(unique_id), val("deacon"), path("deacon_${unique_id}_microbial.fq.gz"), emit: microbial_fastq
-    tuple val(unique_id), val("deacon"), path("deacon_${unique_id}_human.fq.gz"), emit: human_fastq
-    tuple val(unique_id), path("deacon_${unique_id}_microbial.fq.gz"), path("deacon_${unique_id}_human.fq.gz"),  emit: combined
+    tuple val(unique_id), val(name), path("${name}_${unique_id}_microbial.fq.gz"), emit: microbial_fastq
+    tuple val(unique_id), val(name), path("${name}_${unique_id}_human.fq.gz"), emit: human_fastq
+    tuple val(unique_id), val(name), path("${name}_${unique_id}_microbial.fq.gz"), path("${name}_${unique_id}_human.fq.gz"),  emit: combined
 
     script:
+    // extra_args are applied to both calls so that the human and microbial sets are exact complements
     """
-    deacon filter ${deacon_index} ${fastq} -o "deacon_${unique_id}_human.fq.gz"
-    deacon filter -d ${deacon_index} ${fastq} -o "deacon_${unique_id}_microbial.fq.gz"
+    deacon filter ${extra_args} ${deacon_index} ${fastq} -o "${name}_${unique_id}_human.fq.gz"
+    deacon filter -d ${extra_args} ${deacon_index} ${fastq} -o "${name}_${unique_id}_microbial.fq.gz"
     """
 }
 
@@ -47,36 +50,40 @@ process collect_classifications {
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
 
     input:
-    tuple val(unique_id), path(microbial_fastq), path(host_fastq)
+    tuple val(unique_id), val(name), path(microbial_fastq), path(host_fastq)
 
     output:
-    tuple val(unique_id), val("deacon"), path("${unique_id}.deacon.out"),  emit: result
+    tuple val(unique_id), val(name), path("${unique_id}.${name}.out"),  emit: result
 
     script:
     """
     cat ${host_fastq}  | gunzip | awk 'NR%4==1 {print substr(\$1,2)}' > list_host
     cat ${microbial_fastq}  | gunzip | awk 'NR%4==1 {print substr(\$1,2)}' > list_microbial
-    echo -e "read_id\tclassification" > "${unique_id}.deacon.out"
+    echo -e "read_id\tclassification" > "${unique_id}.${name}.out"
     for id in \$(cat list_microbial)
       do
         echo -e "\$id\tmicrobial"
-      done >> "${unique_id}.deacon.out"
+      done >> "${unique_id}.${name}.out"
     for id in \$(cat list_host)
       do
         echo -e "\$id\thuman"
-      done >> "${unique_id}.deacon.out"
+      done >> "${unique_id}.${name}.out"
     """
 }
 
+// Run once per deacon setting: name labels the comparator (e.g. deacon, deacon_sensitive) in all outputs
+// and extra_args are added to the deacon filter calls.
 workflow evaluate_deacon {
     take:
         fastq_ch
+        deacon_index
+        name
+        extra_args
     main:
 
-    download_deacon_index()
     refs = file("$projectDir/${params.refs}", type: "file", checkIfExists:true)
 
-    run_deacon(fastq_ch, download_deacon_index.out)
+    run_deacon(fastq_ch, deacon_index, name, extra_args)
     collect_classifications(run_deacon.out.combined)
     minimap2_microbial(run_deacon.out.microbial_fastq, refs)
     minimap2_host(run_deacon.out.human_fastq, refs)

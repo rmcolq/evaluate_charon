@@ -23,3 +23,9 @@ comma separated) in a file passed with `--contaminant_accs`, so that they are no
 Per sample and classifier the pipeline writes `*_calls.parquet` (every read and its classification) and `*_leaks.parquet`
 (every read called microbial, with features, mapping, BLAST and tier columns). If `pyarrow` is not in the container, gzipped
 CSV is written instead. Run time and peak memory per process are in `execution_trace.txt`.
+
+## Classifiers compared
+
+`--charon`, `--deacon` and `--nohuman` each run one tool with its default settings. `--deacon_sensitive` runs deacon again as a
+separate comparator (named `deacon_sensitive` in all outputs) with its high sensitivity settings, an absolute threshold of 1 and
+no relative threshold (`-a 1 -r 0`). nohuman has no equivalent mode.

@@ -1,5 +1,6 @@
 include { evaluate_charon } from '../modules/charon'
-include { evaluate_deacon } from '../modules/deacon'
+include { evaluate_deacon; download_deacon_index } from '../modules/deacon'
+include { evaluate_deacon as evaluate_deacon_sensitive } from '../modules/deacon'
 include { evaluate_nohuman } from '../modules/nohuman'
 include { evaluate_summary } from '../modules/utils'
 
@@ -31,9 +32,20 @@ workflow evaluate_dehosting {
       eval_ch = eval_ch.mix(build_eval_ch(evaluate_charon.out))
     }
 
+    if (params.deacon || params.deacon_sensitive){
+      // both deacon settings use the same index, so download it once
+      download_deacon_index()
+    }
+
     if (params.deacon){
-      evaluate_deacon(fastq_ch)
+      evaluate_deacon(fastq_ch, download_deacon_index.out, "deacon", "")
       eval_ch = eval_ch.mix(build_eval_ch(evaluate_deacon.out))
+    }
+
+    if (params.deacon_sensitive){
+      // high sensitivity host depletion: absolute threshold of 1 and no relative threshold
+      evaluate_deacon_sensitive(fastq_ch, download_deacon_index.out, "deacon_sensitive", "-a 1 -r 0")
+      eval_ch = eval_ch.mix(build_eval_ch(evaluate_deacon_sensitive.out))
     }
 
     if (params.nohuman){

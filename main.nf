@@ -68,6 +68,6 @@ workflow {
     }
 
     // free each sample's slot once every enabled method has finished with it
-    n_methods = [params.charon, params.deacon, params.nohuman].count{ it }
+    n_methods = [params.charon, params.deacon, params.deacon_sensitive, params.nohuman].count{ it }
     release_finished_samples(done_ch, n_methods)
 }
