@@ -11,8 +11,6 @@ from simplesam import Reader
 import gzip
 import math
 from collections import defaultdict
-import taxoniq
-import copy
 
 ebv_accs = ["NC_007605.1","NC_009334.1"]
 mycoplasma_accs = ["NC_010163.1","NC_014921.1","NZ_CP009652.1","NZ_AP014657.1","NZ_LS991950.1","NZ_LR214940.1","NZ_LR214941.1","NZ_LR214942.1","NZ_LR214943.1","NZ_LR214944.1"]
@@ -46,20 +44,41 @@ key = {
 }
 
 def get_gc_ratio(inputStr):
-    compression_ratio = len(inputStr.replace("A","").replace("T",""))/len(inputStr)
-    return compression_ratio
+    if len(inputStr) == 0:
+        return 0
+    seq = inputStr.upper()
+    return (seq.count("G") + seq.count("C"))/len(seq)
 
 def get_kmer_ratio(inputStr, k):
     kmers = set()
     max_size = math.pow(4,k)
     if len(inputStr) < k:
         return 0
-    for i in range(len(inputStr) - k):
+    for i in range(len(inputStr) - k + 1):
         kmers.add(inputStr[i:i+k])
         if i%max_size == 0:
             if len(kmers) == max_size:
                 break
     return len(kmers)/max_size
+
+def get_mean_quality(qual):
+    """Mean Phred quality of a SAM QUAL string, averaged over error probabilities."""
+    if qual is None or qual == "*" or len(qual) == 0:
+        return np.nan
+    phred = np.frombuffer(qual.encode(), dtype=np.uint8).astype(float) - 33
+    return float(-10 * np.log10(np.mean(np.power(10, -phred / 10))))
+
+def load_contaminant_accs(path):
+    """Read extra contaminant accessions (whitespace or comma separated) which should not be counted as human."""
+    accs = []
+    if path is None:
+        return accs
+    with open(path) as f:
+        for line in f:
+            for acc in line.replace(",", " ").split():
+                if not acc.startswith("#"):
+                    accs.append(acc)
+    return accs
 
 def load_map_info_from_sam(sam):
     processed_read_ids = set()
@@ -90,6 +109,7 @@ def load_map_info_from_sam(sam):
             entry["seq_length"] = len(x.seq)
             entry["gc_ratio"] = get_gc_ratio(x.seq)
             entry["5mer_ratio"] = get_kmer_ratio(x.seq, 5)
+            entry["sam_mean_quality"] = get_mean_quality(x.qual)
             for motif in ["A","C","G","T"]:
                 entry[motif] = x.gapped('seq').count(motif)
             entry["mapped_prop"] = entry["mapped_length"] / entry["seq_length"]
@@ -98,49 +118,90 @@ def load_map_info_from_sam(sam):
                 sys.stderr.write("Processed " + str(len(map_details)) + "\n")
         df = pd.DataFrame(map_details)
     else:
-        columns = ["read_id","ref","ref_name","pos","ref_start","ref_end","mapped_length","mismatches","identity","divergence","seq_length","gc_ratio","5mer_ratio","A","C","G","T","mapped_prop"]
+        columns = ["read_id","ref","ref_name","pos","ref_start","ref_end","mapped_length","mismatches","identity","divergence","seq_length","gc_ratio","5mer_ratio","sam_mean_quality","A","C","G","T","mapped_prop"]
         df = pd.DataFrame(columns=columns)
     sys.stderr.write("Found " + str(df.shape)  + " entries\n")
     return df
 
-def load_blast_info(blast_results):
-    processed_ids = set()
-    sys.stderr.write("LOAD BLAST INFO FROM: " + blast_results + "\n")
-    if (os.path.getsize(blast_results) > 0):
-        default_ = {"read_id":None, "taxids":[], "names":[], "human_accs":[], "blast_human":False, "pident":0, "top_hit":None}
-        details = defaultdict(lambda:copy.deepcopy(default_))
-        with open(blast_results, 'r') as f:
-            for line in f:
-                if len(line.strip())==0:
-                    continue
-                qseqid,sacc,sscinames,staxids,sstart,send,evalue,pident,length = line.strip().split()
+BLAST_COLUMNS = ["read_id", "taxids", "names", "human_accs", "blast_human", "pident", "top_hit",
+                 "human_bitscore", "human_qcov", "human_pident", "nonhuman_bitscore", "nonhuman_qcov",
+                 "nonhuman_pident", "nonhuman_taxid", "nonhuman_name", "blast_nonhuman_run"]
 
-                if f"{qseqid}_{staxids}" in processed_ids:
-                    continue
-                else:
-                    processed_ids.add(f"{qseqid}_{staxids}")
+def is_human_hit(staxids):
+    return "9606" in staxids.split(";")
 
-                if details[qseqid]["top_hit"] is None:
-                    details[qseqid]["top_hit"] = staxids
-                if float(pident) < 90 and len(details[qseqid]["taxids"]) > 0:
-                    continue
-                if staxids not in details[qseqid]["taxids"]:
-                    details[qseqid]["taxids"].append(staxids)
-                    details[qseqid]["names"].append(sscinames)
-                    details[qseqid]["read_id"] = qseqid
-                    if staxids == "9606":
-                        details[qseqid]["blast_human"] = True
-                        details[qseqid]["human_accs"].append(f"{sacc}:{sstart}-{send}")
-                        details[qseqid]["pident"] = float(pident)
-        for qseqid in details:
-            details[qseqid]["taxids"] = ";".join(list(set(details[qseqid]["taxids"])))
-            details[qseqid]["names"] = ";".join(list(set(details[qseqid]["names"])))
-            details[qseqid]["human_accs"] = ";".join(list(set(details[qseqid]["human_accs"])))
-        df = pd.DataFrame(details.values())
+def parse_blast_line(line):
+    """Return (hit_set, fields) where hit_set is 'all' or 'nonhuman' and fields are
+    qseqid, sacc, sscinames, staxids, sstart, send, evalue, pident, length, bitscore, qcovs.
+    Handles the legacy 9 column format (no bitscore or coverage) too."""
+    parts = line.rstrip("\n").split("\t")
+    if len(parts) == 12:
+        hit_set, parts = parts[0], parts[1:]
+    elif len(parts) == 11:
+        hit_set = "all"
+    elif len(parts) == 9:
+        hit_set, parts = "all", parts + ["nan", "nan"]
     else:
-        columns = ["read_id", "taxids", "names", "human_accs", "blast_human", "pident"]
-        df = pd.DataFrame(columns=columns)
-    df.set_index("read_id")
+        raise ValueError(f"Unexpected number of BLAST columns ({len(parts)}): {line}")
+    return hit_set, parts
+
+def load_blast_info(blast_results):
+    sys.stderr.write("LOAD BLAST INFO FROM: " + blast_results + "\n")
+    if (os.path.getsize(blast_results) == 0):
+        df = pd.DataFrame(columns=BLAST_COLUMNS)
+        sys.stderr.write("Found " + str(df.shape)  + " entries\n")
+        return df
+
+    details = {}
+    seen = set()
+    nonhuman_run = False
+    with open(blast_results, 'r') as f:
+        for line in f:
+            if len(line.strip())==0:
+                continue
+            hit_set, parts = parse_blast_line(line)
+            qseqid,sacc,sscinames,staxids,sstart,send,evalue,pident,length,bitscore,qcovs = parts
+            pident, bitscore, qcovs = float(pident), float(bitscore), float(qcovs)
+            if hit_set == "nonhuman":
+                nonhuman_run = True
+            entry = details.setdefault(qseqid, {"read_id":qseqid, "taxids":[], "names":[], "human_accs":[], "blast_human":False,
+                        "pident":0, "top_hit":None, "human_bitscore":np.nan, "human_qcov":np.nan, "human_pident":np.nan,
+                        "nonhuman_bitscore":np.nan, "nonhuman_qcov":np.nan, "nonhuman_pident":np.nan,
+                        "nonhuman_taxid":None, "nonhuman_name":None})
+            human = is_human_hit(staxids)
+
+            # best hit by bitscore, human and non-human separately (blast output order is not by bitscore)
+            if human:
+                if not bitscore <= entry["human_bitscore"]:
+                    entry["human_bitscore"], entry["human_qcov"], entry["human_pident"] = bitscore, qcovs, pident
+            elif not bitscore <= entry["nonhuman_bitscore"]:
+                entry["nonhuman_bitscore"], entry["nonhuman_qcov"], entry["nonhuman_pident"] = bitscore, qcovs, pident
+                entry["nonhuman_taxid"], entry["nonhuman_name"] = staxids, sscinames
+
+            if hit_set == "nonhuman":
+                continue
+
+            # summary of the taxa hit (first hit, then all taxa with at least 90% identity)
+            if f"{qseqid}_{staxids}" in seen:
+                continue
+            seen.add(f"{qseqid}_{staxids}")
+            if entry["top_hit"] is None:
+                entry["top_hit"] = staxids
+            if pident < 90 and len(entry["taxids"]) > 0:
+                continue
+            if staxids not in entry["taxids"]:
+                entry["taxids"].append(staxids)
+                entry["names"].append(sscinames)
+                if human:
+                    entry["blast_human"] = True
+                    entry["human_accs"].append(f"{sacc}:{sstart}-{send}")
+                    entry["pident"] = pident
+    for entry in details.values():
+        entry["taxids"] = ";".join(sorted(set(entry["taxids"])))
+        entry["names"] = ";".join(sorted(set(entry["names"])))
+        entry["human_accs"] = ";".join(sorted(set(entry["human_accs"])))
+        entry["blast_nonhuman_run"] = nonhuman_run
+    df = pd.DataFrame(details.values(), columns=BLAST_COLUMNS)
     sys.stderr.write("Found " + str(df.shape)  + " entries\n")
     return df
 
@@ -153,7 +214,6 @@ def load_both_sam(host_sam, microbial_sam):
     #microbial_df["sam"] = "microbial"
     sys.stderr.write("COMBINE DATAFRAMES\n")
     df = pd.concat([host_df, microbial_df], ignore_index=True)
-    df.set_index("read_id")
     return df
 
 def load_charon_output(path):
@@ -164,8 +224,10 @@ def load_charon_output(path):
         entry = {"status":row[0], "read_id":row[1], "classification": row[2], "length": row[3], "num_hashes":row[4],   "mean_quality": row[5], "confidence": row[6], "compression":row[7]}
         try:
             details = row[8].split(" ")
-        except:
-            print(row)
+        except AttributeError:
+            # no per-category details for this read (NaN), so do not reuse the previous read's
+            sys.stderr.write(f"No category details for read {row[1]}\n")
+            details = []
         for part in details:
             try:
                 category, num_hits, prop_hits, prop_unique_hits, prob = part.split(":")
@@ -199,12 +261,13 @@ def load_tsv_output(path, classifier):
 
     return df
 
-def load_output(path):
-    if "charon" in path:
-        return "charon", load_charon_output(path)
-    else:
-        classifier = path.split(".")[-2]
-        return classifier, load_tsv_output(path, classifier)
+def load_output(path, classifier=None):
+    if classifier is None:
+        # legacy behaviour: infer from the file name
+        classifier = "charon" if "charon" in path else path.split(".")[-2]
+    if classifier == "charon":
+        return classifier, load_charon_output(path)
+    return classifier, load_tsv_output(path, classifier)
     
 
 def add_classified_counts_to_summary(df, summary, classifier):
@@ -230,9 +293,10 @@ def add_classified_counts_to_summary(df, summary, classifier):
     summary[f"classified_{classifier}"] = summary[f"num_host_{classifier}"] + summary[f"num_microbial_{classifier}"]
 
     #2. Scale these to proportions
-    summary[f"prop_host_{classifier}"] = summary[f"num_host_{classifier}"]/summary["total"]
-    summary[f"prop_microbial_{classifier}"] = summary[f"num_microbial_{classifier}"]/summary["total"]
-    summary[f"prop_unclassified_{classifier}"] = summary[f"num_unclassified_{classifier}"]/summary["total"]
+    total = max(summary["total"], 1)
+    summary[f"prop_host_{classifier}"] = summary[f"num_host_{classifier}"]/total
+    summary[f"prop_microbial_{classifier}"] = summary[f"num_microbial_{classifier}"]/total
+    summary[f"prop_unclassified_{classifier}"] = summary[f"num_unclassified_{classifier}"]/total
 
     return summary
 
@@ -301,23 +365,29 @@ def check_related_taxa(microbial_host_df, classifier, prefix):
     #7. For reads which classify as microbial and minimap to host but do not have a blast human result, what taxa does blast return
     related_taxa = set()
     microbial_host_unverified_ids = microbial_host_df[microbial_host_df["blast_human"]==False]["taxids"]
-    for i in microbial_host_unverified_ids:
-        related_taxa.update(i.split(";"))
+    for i in microbial_host_unverified_ids.dropna():
+        related_taxa.update([t for t in str(i).split(";") if t.isdigit() and t != "0"])
 
     if len(related_taxa) > 0:
+        import taxoniq
         taxa_file = Path(f"{prefix}_related_taxa.csv")
         with open(taxa_file, "w") as f:
             species_ids = []
             species_names = []
-            for taxid in related_taxa:
-                t = taxoniq.Taxon(int(taxid))
-                for s in t.ranked_lineage:
+            for taxid in sorted(related_taxa):
+                try:
+                    t = taxoniq.Taxon(int(taxid))
+                    lineage = t.ranked_lineage
+                except KeyError:
+                    sys.stderr.write(f"Taxon {taxid} not found in taxoniq\n")
+                    continue
+                for s in lineage:
                     if s.rank.name == "species":
                         if s.tax_id not in species_ids:
                             species_ids.append(s.tax_id)
                             species_names.append(s.scientific_name)
             species_ids = [str(id) for id in species_ids]
-            f.write(f"{','.join(related_taxa)}\n")
+            f.write(f"{','.join(sorted(related_taxa))}\n")
             f.write(f"{','.join(species_ids)}\n")
             f.write(f"{','.join(species_names)}\n")
         sys.stderr.write(f"Found microbial taxa which are closely related to human for classifier {classifier}:\n{species_names}\n")
@@ -326,8 +396,8 @@ def check_human_accs(microbial_host_df, classifier, prefix):
     #8. For reads which classify as microbial and map to host and have a blast human result, what human accessions
     human_accs = set()
     microbial_host_verified_accs = microbial_host_df[microbial_host_df["blast_human"]==True]["human_accs"]
-    for i in microbial_host_verified_accs:
-        human_accs.update(i.split(";"))
+    for i in microbial_host_verified_accs.dropna():
+        human_accs.update(str(i).split(";"))
 
     if len(human_accs) > 0:
         accs_file = Path(f"{prefix}_human_accs.csv")
@@ -346,6 +416,36 @@ def add_unclassified_to_summary(df, summary):
         summary[f"max_{column}_unclassified"] = df_unclassified[column].max()
         summary[f"min_{column}_unclassified"] = df_unclassified[column].min()
 
+def add_leak_tiers(df, min_blast_cov, min_blast_pident, bitscore_ratio):
+    """Assign each read a leak tier (0 = not called microbial); each tier is a subset of the one above.
+    1: called microbial
+    2: 1 and maps to the human (T2T) reference, i.e. not unmapped, EBV or another contaminant
+    3: 2 and a BLAST human hit with at least min_blast_cov % query coverage and min_blast_pident % identity
+    4: 3 and the best human bitscore is at least bitscore_ratio times the best non-human bitscore
+       (or there was no non-human hit), so the read is human-specific rather than a shared region.
+       Only assigned when the non-human BLAST search was run."""
+    for column in BLAST_COLUMNS[1:]:
+        if column not in df.columns:
+            df[column] = np.nan
+    microbial = df["classification"] == "microbial"
+    t2 = microbial & ~df["unmapped"] & ~df["ref"].isin(ebv_accs + other_accs)
+    human_hit = df["blast_human"].fillna(False).astype(bool)
+    if df["human_qcov"].notna().any():
+        human_hit = human_hit & (df["human_qcov"] >= min_blast_cov) & (df["human_pident"] >= min_blast_pident)
+    t3 = t2 & human_hit
+    nonhuman_run = df["blast_nonhuman_run"].fillna(False).astype(bool)
+    better_than_nonhuman = df["nonhuman_bitscore"].isna() | (df["human_bitscore"] >= bitscore_ratio * df["nonhuman_bitscore"])
+    t4 = t3 & nonhuman_run & better_than_nonhuman
+    df["leak_tier"] = microbial.astype(int) + t2.astype(int) + t3.astype(int) + t4.astype(int)
+    return df
+
+def add_leak_tiers_to_summary(df, summary, classifier):
+    total = max(df.shape[0], 1)
+    for tier in [1, 2, 3, 4]:
+        n = int((df["leak_tier"] >= tier).sum())
+        summary[f"num_leak_tier{tier}_{classifier}"] = n
+        summary[f"leaks_per_million_tier{tier}_{classifier}"] = n / total * 1e6
+
 def generate_summary(df, prefix, classifier):
     sys.stderr.write("GENERATE SUMMARY\n")
     summary = {}
@@ -358,10 +458,28 @@ def generate_summary(df, prefix, classifier):
     check_related_taxa(microbial_host_df, classifier, prefix)
     check_human_accs(microbial_host_df, classifier, prefix)
 
+    add_leak_tiers_to_summary(df, summary, classifier)
+
     if classifier == "charon":
         add_unclassified_to_summary(df, summary)
 
     return summary
+
+def write_table(df, path_without_ext):
+    """Write parquet if pyarrow is installed, else gzipped CSV."""
+    try:
+        import pyarrow  # noqa: F401
+        df.to_parquet(f"{path_without_ext}.parquet", index=False)
+    except ImportError:
+        sys.stderr.write("pyarrow is not installed, so writing gzipped CSV instead of parquet\n")
+        df.to_csv(f"{path_without_ext}.csv.gz", index=False)
+
+def write_compact_tables(df, prefix):
+    """Compact per-sample outputs for aggregating across a large run, instead of loading the full CSV.
+    _calls: one row per read with the classification, so methods can be compared read by read.
+    _leaks: every read called microbial, with all features, mapping, BLAST and tier columns."""
+    write_table(df[["read_id", "sample_id", "classifier", "classification", "status"]].astype(str), f"{prefix}_calls")
+    write_table(df[df["classification"] == "microbial"], f"{prefix}_leaks")
 
 # Main method
 def main():
@@ -399,7 +517,31 @@ def main():
         help="TAB separated result from blastn showing top blast hits for microbial reads which map to T2T reference",
     )
 
+    parser.add_argument(
+        "--classifier",
+        dest="classifier",
+        required=False,
+        help="Name of the classifier which produced the input (charon, deacon, nohuman). Inferred from the file names if not given",
+    )
+    parser.add_argument(
+        "--sample_id",
+        dest="sample_id",
+        required=False,
+        help="Sample identifier. Taken from the input file name if not given",
+    )
+    parser.add_argument(
+        "--contaminant_accs",
+        dest="contaminant_accs",
+        required=False,
+        help="File of extra reference accessions (whitespace or comma separated) which are real contaminants rather than human",
+    )
+    parser.add_argument("--min_blast_cov", dest="min_blast_cov", type=float, default=80, help="Minimum query coverage (%%) of a BLAST human hit to count at leak tier 3")
+    parser.add_argument("--min_blast_pident", dest="min_blast_pident", type=float, default=90, help="Minimum identity (%%) of a BLAST human hit to count at leak tier 3")
+    parser.add_argument("--bitscore_ratio", dest="bitscore_ratio", type=float, default=1.1, help="Human bitscore must be at least this multiple of the best non-human bitscore to count at leak tier 4")
+
     args = parser.parse_args()
+    other_accs.extend(load_contaminant_accs(args.contaminant_accs))
+    sample_id = args.sample_id if args.sample_id else args.input.split("/")[-1].split(".")[0]
 
     # Start Program
     now = datetime.now()
@@ -418,33 +560,41 @@ def main():
         blast_df = load_blast_info(args.blast_result)
         blast_df.to_csv("blast_df.csv")
 
-        combined_df = mapped_df.merge(blast_df, how="left")
+        combined_df = mapped_df.merge(blast_df, how="left", on="read_id")
         combined_df.to_csv("combined_df.csv")
         assert combined_df.shape[0] == mapped_df.shape[0], "The number of rows in the combined dataframe does not match the mapped dataframe."
 
-        classifier, classifier_df = load_output(args.input)
+        classifier, classifier_df = load_output(args.input, args.classifier)
 
         sys.stderr.write("COMBINE CLASSIFIER AND MAPPING DATA\n")
-        classifier_df.set_index("read_id")
         old_size = classifier_df.shape[0]
-        classifier_df = classifier_df.merge(combined_df, how="left")
+        classifier_df = classifier_df.merge(combined_df, how="left", on="read_id")
         assert classifier_df.shape[0] == old_size, "The number of rows in the charon dataframe changed when combined with mapping dataframe."
         
         classifier_df['ref_name'] = classifier_df['ref_name'].fillna("")
         classifier_df["unmapped"] = classifier_df["mapped_length"].isna()
+        for column in ["taxids", "names", "human_accs"]:
+            classifier_df[column] = classifier_df[column].fillna("")
+        classifier_df["blast_human"] = classifier_df["blast_human"].fillna(False).astype(bool)
+        classifier_df["blast_nonhuman_run"] = classifier_df["blast_nonhuman_run"].fillna(False).astype(bool)
 
-        classifier_df["sample_id"] = args.input.split("/")[-1].split(".")[0]
+        classifier_df["sample_id"] = sample_id
+        classifier_df["classifier"] = classifier
+        classifier_df = add_leak_tiers(classifier_df, args.min_blast_cov, args.min_blast_pident, args.bitscore_ratio)
         classifier_df.to_csv(full_file, index=False)
     else:
         classifier_df = pd.read_csv(full_file, index_col=None)
-        classifier = str(full_file).split("_full.csv")[0].split("_")[-1]
+        classifier = args.classifier if args.classifier else str(full_file).split("_full.csv")[0].split("_")[-1]
         classifier_df['classification'] = classifier_df['classification'].fillna("")
+        classifier_df = add_leak_tiers(classifier_df, args.min_blast_cov, args.min_blast_pident, args.bitscore_ratio)
+
+    write_compact_tables(classifier_df, args.prefix)
 
     summary = generate_summary(classifier_df, args.prefix, classifier)
 
     # Save to CSV
     fieldnames = ["sample_id"] + list(summary.keys())
-    summary["sample_id"] = args.input.split("/")[-1].split(".")[0]
+    summary["sample_id"] = sample_id
 
     summary_file = Path(args.prefix + "_summary.csv")
     writer = None

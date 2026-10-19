@@ -7,7 +7,7 @@ include { evaluate_summary } from '../modules/utils'
 // [id, classifier, report, host_sam, microbial_sam, blast_result]
 // When blast is not run, an empty placeholder is used (evaluate.py treats an empty file as no hits).
 def build_eval_ch(method) {
-    def no_blast = file("${projectDir}/resources/NO_BLAST", checkIfExists: true)
+    def no_blast = file("${projectDir}/assets/NO_FILE", checkIfExists: true)
     def eval_ch = method.report
                     .combine(method.host_sam, by: 0)
                     .combine(method.microbial_sam, by: 0)
@@ -42,7 +42,8 @@ workflow evaluate_dehosting {
     }
 
     // a process can only be invoked once per workflow, so all methods share this call
-    evaluate_summary(eval_ch)
+    contaminant_accs = params.contaminant_accs ? file(params.contaminant_accs, checkIfExists: true) : file("${projectDir}/assets/NO_FILE", checkIfExists: true)
+    evaluate_summary(eval_ch, contaminant_accs)
 
     emit:
     done = evaluate_summary.out.done

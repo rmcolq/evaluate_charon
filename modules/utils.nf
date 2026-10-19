@@ -169,17 +169,35 @@ process blastn_microbial_host_hits {
     } else {
         db = "nt -remote"
     }
+    // Best hit is chosen by bitscore downstream, so keep enough targets that human hits do not crowd out the rest.
+    // The second search excludes human (taxid 9606) to find the best non-human hit; every line is prefixed
+    // with the search it came from ("all" or "nonhuman").
+    nonhuman = ""
+    if (params.blast_nonhuman) {
+        nonhuman = """
+      blastn -query ${fasta_file} \\
+        -db ${db} \\
+        -out nonhuman.txt \\
+        -negative_taxids 9606 \\
+        -evalue 1e-6 \\
+        -perc_identity 85 \\
+        -max_target_seqs ${params.blast_max_targets} \\
+        -outfmt "6 qseqid sacc sscinames staxids sstart send evalue pident length bitscore qcovs"
+      awk 'BEGIN{FS=OFS="\\t"} {print "nonhuman", \$0}' nonhuman.txt >> results_blastn.txt
+        """
+    }
     """
+    : > results_blastn.txt
     if [ -s ${fasta_file} ]; then
-      blastn -query ${fasta_file} \
-        -db ${db} \
-        -out results_blastn.txt \
-        -evalue 1e-6 \
-        -perc_identity 85 \
-        -max_target_seqs 5 \
-        -outfmt "6 qseqid sacc sscinames staxids sstart send evalue pident length"
-    else
-      touch "results_blastn.txt"
+      blastn -query ${fasta_file} \\
+        -db ${db} \\
+        -out all.txt \\
+        -evalue 1e-6 \\
+        -perc_identity 85 \\
+        -max_target_seqs ${params.blast_max_targets} \\
+        -outfmt "6 qseqid sacc sscinames staxids sstart send evalue pident length bitscore qcovs"
+      awk 'BEGIN{FS=OFS="\\t"} {print "all", \$0}' all.txt >> results_blastn.txt
+      ${nonhuman}
     fi
     """
 }
@@ -241,11 +259,14 @@ process evaluate_summary {
 
     input:
     tuple val(unique_id), val(classifier), path(report), path(host_sam), path(microbial_sam), path(blast_result)
+    path(contaminant_accs)
 
     output:
     tuple val(unique_id), val(classifier), emit: done
     path "${unique_id}*_summary.csv", emit: summary
     path "${unique_id}*_full.csv", emit: full
+    path "${unique_id}*_calls.*", emit: calls
+    path "${unique_id}*_leaks.*", emit: leaks
     path "${unique_id}*_data.csv", emit: data
     path "${unique_id}*_taxa.csv", emit: taxa, optional:true
     path "${unique_id}*_accs.csv", emit: accs, optional:true
@@ -257,6 +278,12 @@ process evaluate_summary {
       --microbial_sam ${microbial_sam} \
       --host_sam ${host_sam} \
       --blast_result ${blast_result} \
+      --classifier ${classifier} \
+      --sample_id ${unique_id} \
+      --contaminant_accs ${contaminant_accs} \
+      --min_blast_cov ${params.blast_min_cov} \
+      --min_blast_pident ${params.blast_min_pident} \
+      --bitscore_ratio ${params.blast_bitscore_ratio} \
       -p "${unique_id}_${classifier}"
     """
 }
