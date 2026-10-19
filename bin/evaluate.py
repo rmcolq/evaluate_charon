@@ -15,6 +15,7 @@ import taxoniq
 import copy
 
 ebv_accs = ["NC_007605.1","NC_009334.1"]
+mycoplasma_accs = ["NC_010163.1","NC_014921.1","NZ_CP009652.1","NZ_AP014657.1","NZ_LS991950.1","NZ_LR214940.1","NZ_LR214941.1","NZ_LR214942.1","NZ_LR214943.1","NZ_LR214944.1"]
 other_accs = ["KC670213.1","XR_003525368.1","XR_003525370.1","KC670203.1"]
 key = {
     "NC_060925.1": "Chromosome 1",
@@ -79,6 +80,8 @@ def load_map_info_from_sam(sam):
             ref_name = None
             if ref in ebv_accs:
                 ref_name = "EBV"
+            elif ref in mycoplasma_accs:
+                ref_name = "mycoplasma"
             elif ref in other_accs:
                 ref_name = "other"
             elif ref in key:
@@ -245,7 +248,7 @@ def add_host_counts_to_summary(df, summary, classifier, prefix):
     host_ebv_df = df_host[df_host["ref"].isin(ebv_accs)]
     summary[f"num_host_map_ebv_{classifier}"] = host_ebv_df.shape[0]
 
-    host_host_df = df_host[~df_host["ref"].isin(ebv_accs + other_accs)]
+    host_host_df = df_host[~df_host["ref"].isin(ebv_accs + mycoplasma_accs + other_accs)]
     summary[f"num_host_map_host_{classifier}"] = host_host_df.shape[0]
 
     if host_total > 0:
@@ -273,7 +276,7 @@ def add_microbial_counts_to_summary(df, summary, classifier, prefix):
     microbial_ebv_df = df_microbial[df_microbial["ref"].isin(ebv_accs)]
     summary[f"num_microbial_map_ebv_{classifier}"] = microbial_ebv_df.shape[0]
 
-    microbial_host_df = df_microbial[~df_microbial["ref"].isin(ebv_accs + other_accs)]
+    microbial_host_df = df_microbial[~df_microbial["ref"].isin(ebv_accs + mycoplasma_accs + other_accs)]
     summary[f"num_microbial_map_host_{classifier}"] = microbial_host_df.shape[0]
 
     microbial_host_verified_df = microbial_host_df[microbial_host_df["blast_human"]==True]
