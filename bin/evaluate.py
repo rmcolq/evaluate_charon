@@ -428,7 +428,7 @@ def add_leak_tiers(df, min_blast_cov, min_blast_pident, bitscore_ratio):
         if column not in df.columns:
             df[column] = np.nan
     microbial = df["classification"] == "microbial"
-    t2 = microbial & ~df["unmapped"] & ~df["ref"].isin(ebv_accs + other_accs)
+    t2 = microbial & ~df["unmapped"] & ~df["ref"].isin(ebv_accs + mycoplasma_accs + other_accs)
     human_hit = df["blast_human"].fillna(False).astype(bool)
     if df["human_qcov"].notna().any():
         human_hit = human_hit & (df["human_qcov"] >= min_blast_cov) & (df["human_pident"] >= min_blast_pident)
