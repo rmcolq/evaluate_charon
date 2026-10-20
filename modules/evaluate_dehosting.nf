@@ -1,4 +1,5 @@
 include { evaluate_charon } from '../modules/charon'
+include { evaluate_charon as evaluate_charon_host_only } from '../modules/charon'
 include { evaluate_deacon; download_deacon_index } from '../modules/deacon'
 include { evaluate_deacon as evaluate_deacon_sensitive } from '../modules/deacon'
 include { evaluate_nohuman } from '../modules/nohuman'
@@ -28,8 +29,14 @@ workflow evaluate_dehosting {
     eval_ch = Channel.empty()
 
     if (params.charon){
-      evaluate_charon(fastq_ch)
+      evaluate_charon(fastq_ch, file(params.db, type: "file", checkIfExists: true), "charon", "microbial")
       eval_ch = eval_ch.mix(build_eval_ch(evaluate_charon.out))
+    }
+
+    if (params.charon_host_only){
+      // charon with an index of the host only, so reads are called host or not host; the not host reads are kept
+      evaluate_charon_host_only(fastq_ch, file(params.db_host_only, type: "file", checkIfExists: true), "charon_host_only", "non_host")
+      eval_ch = eval_ch.mix(build_eval_ch(evaluate_charon_host_only.out))
     }
 
     if (params.deacon || params.deacon_sensitive){

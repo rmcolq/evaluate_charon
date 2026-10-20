@@ -216,7 +216,7 @@ def load_both_sam(host_sam, microbial_sam):
     df = pd.concat([host_df, microbial_df], ignore_index=True)
     return df
 
-def load_charon_output(path):
+def load_charon_output(path, classifier="charon"):
     sys.stderr.write("LOAD CHARON OUTPUT from " + path + "\n")
     df = pd.read_csv(path, sep="\t", index_col=False, header=None)
     entries = []
@@ -239,7 +239,12 @@ def load_charon_output(path):
             entry[f"{category}_unique_prop"] = float(prop_unique_hits)
         entries.append(entry)
     df =  pd.DataFrame(entries)
-    df["charon"] = df["classification"].fillna("unclassified")
+    if classifier.endswith("_host_only"):
+        # With a host-only index a read is either called host or not. Reads which are not called host are kept,
+        # so treat them as microbial classified, as for the other host depletion tools.
+        df["status"] = "C"
+        df["classification"] = np.where(df["classification"] == "human", "human", "microbial")
+    df[classifier] = df["classification"].fillna("unclassified")
     df['classification'] = df['classification'].fillna("")
 
     for column in ["mean_quality", "length", "compression"]:
@@ -265,8 +270,8 @@ def load_output(path, classifier=None):
     if classifier is None:
         # legacy behaviour: infer from the file name
         classifier = "charon" if "charon" in path else path.split(".")[-2]
-    if classifier == "charon":
-        return classifier, load_charon_output(path)
+    if classifier.startswith("charon"):
+        return classifier, load_charon_output(path, classifier)
     return classifier, load_tsv_output(path, classifier)
     
 

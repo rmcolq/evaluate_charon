@@ -1,12 +1,14 @@
 #!/usr/bin/env nextflow
 include { minimap2_microbial; minimap2_host; verify_microbial_host_hits } from '../modules/utils'
 
+// name labels the comparator (charon or charon_host_only) in all outputs. microbial_category is the extracted
+// category holding the reads to keep: "microbial" for a normal index, "non_host" for a host-only index.
 process run_charon {
 
     label "process_medium_plus_mem"
     label "process_long"
     tag "${unique_id}"
-    container 'docker.io/rmcolq/charon:v1.1.2'
+    container { name == "charon_host_only" ? params.charon_host_only_container : params.charon_container }
     maxForks 4
 
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
@@ -15,11 +17,13 @@ process run_charon {
     input:
     tuple val(unique_id), path(fastq)
     path(db)
+    val(name)
+    val(microbial_category)
 
     output:
-    tuple val(unique_id), val("charon"), path("${fastq.baseName}_microbial.f*q.gz"), emit: microbial_fastq
-    tuple val(unique_id), val("charon"), path("${fastq.baseName}_human.f*q.gz"), emit: human_fastq
-    tuple val(unique_id), val("charon"), path("${unique_id}_charon.out"),  emit: result
+    tuple val(unique_id), val(name), path("${fastq.baseName}_${microbial_category}.f*q.gz"), emit: microbial_fastq
+    tuple val(unique_id), val(name), path("${fastq.baseName}_human.f*q.gz"), emit: human_fastq
+    tuple val(unique_id), val(name), path("${unique_id}_${name}.out"),  emit: result
 
     script:
     """
@@ -31,7 +35,7 @@ process run_charon {
       --prefix ${fastq.baseName} \
       -t ${task.cpus} \
       --max-memory ${(task.memory.toGiga() * 0.8) as int} \
-      > ${unique_id}_charon.out
+      > ${unique_id}_${name}.out
 
     """
 }
@@ -132,15 +136,18 @@ workflow run_charon_in_chunks {
     result
 }
 
+// Run once per charon index: name labels the comparator in all outputs, and db is the index for it.
 workflow evaluate_charon {
     take:
         fastq_ch
+        db
+        name
+        microbial_category
     main:
 
-    db = file(params.db, type: "file", checkIfExists:true)
     refs = file("$projectDir/${params.refs}", type: "file", checkIfExists:true)
 
-    run_charon(fastq_ch, db)
+    run_charon(fastq_ch, db, name, microbial_category)
     minimap2_microbial(run_charon.out.microbial_fastq, refs)
     minimap2_host(run_charon.out.human_fastq, refs)
 

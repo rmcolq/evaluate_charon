@@ -32,8 +32,14 @@ workflow {
     if (params.reset_slots) file(params.slot_dir).deleteDir()
 
     // Check if required parameters are provided
-    if (!params.db) {
-        exit 1, "Please provide --db when running Nextflow."
+    if (params.charon && !params.db) {
+        exit 1, "Please provide --db (the charon index) when running Nextflow with --charon."
+    }
+    if (params.charon_host_only && !params.db_host_only) {
+        exit 1, "Please provide --db_host_only (a charon index of the host only) when running Nextflow with --charon_host_only."
+    }
+    if (params.charon_host_only && !params.charon_host_only_container) {
+        exit 1, "Please provide --charon_host_only_container, a charon image which supports a host-only index, when running with --charon_host_only."
     }
 
     if (params.read_type == "illumina") {
@@ -68,6 +74,6 @@ workflow {
     }
 
     // free each sample's slot once every enabled method has finished with it
-    n_methods = [params.charon, params.deacon, params.deacon_sensitive, params.nohuman].count{ it }
+    n_methods = [params.charon, params.charon_host_only, params.deacon, params.deacon_sensitive, params.nohuman].count{ it }
     release_finished_samples(done_ch, n_methods)
 }

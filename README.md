@@ -29,3 +29,9 @@ CSV is written instead. Run time and peak memory per process are in `execution_t
 `--charon`, `--deacon` and `--nohuman` each run one tool with its default settings. `--deacon_sensitive` runs deacon again as a
 separate comparator (named `deacon_sensitive` in all outputs) with its high sensitivity settings, an absolute threshold of 1 and
 no relative threshold (`-a 1 -r 0`). nohuman has no equivalent mode.
+
+`--charon_host_only` runs charon again with an index of the host only (`--db_host_only`), so reads are called host or not host. Reads
+which are not called host are kept, as for deacon and nohuman, and it is named `charon_host_only` in all outputs. It needs a charon
+image which supports a host-only index (`--charon_host_only_container`); `--charon_container` sets the image for the normal index.
+The host-only index should be built from the same host sequences and k-mer settings as the full index, so that the only difference
+between the two is the microbial category.
