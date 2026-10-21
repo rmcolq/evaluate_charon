@@ -6,7 +6,7 @@ include { evaluate_nohuman } from '../modules/nohuman'
 include { evaluate_summary } from '../modules/utils'
 
 // Combine the pieces for one method into the tuple evaluate_summary expects:
-// [id, classifier, report, host_sam, microbial_sam, blast_result]
+// [id, classifier, report, host_sam, host_sampled_ids, microbial_sam, blast_result]
 // When blast is not run, an empty placeholder is used (evaluate.py treats an empty file as no hits).
 def build_eval_ch(method) {
     def no_blast = file("${projectDir}/assets/NO_FILE", checkIfExists: true)
@@ -16,7 +16,7 @@ def build_eval_ch(method) {
     if (params.evaluate_microbial) {
         eval_ch = eval_ch.combine(method.blast, by: 0)
     } else {
-        eval_ch = eval_ch.map{ id, classifier, report, host, microbial -> [id, classifier, report, host, microbial, no_blast] }
+        eval_ch = eval_ch.map{ id, classifier, report, host, host_ids, microbial -> [id, classifier, report, host, host_ids, microbial, no_blast] }
     }
     return eval_ch
 }

@@ -216,6 +216,16 @@ def load_both_sam(host_sam, microbial_sam):
     df = pd.concat([host_df, microbial_df], ignore_index=True)
     return df
 
+def load_sampled_ids(path):
+    """Read ids of the host reads which were mapped, one per line. None means no sampling information
+    (no file, or an empty one), in which case all host reads are treated as sampled."""
+    if path is None:
+        return None
+    with open(path) as f:
+        ids = {line.strip() for line in f if line.strip()}
+    sys.stderr.write("Host reads sampled for mapping: " + str(len(ids)) + "\n")
+    return ids if ids else None
+
 def load_charon_output(path, classifier="charon"):
     sys.stderr.write("LOAD CHARON OUTPUT from " + path + "\n")
     df = pd.read_csv(path, sep="\t", index_col=False, header=None)
@@ -307,6 +317,12 @@ def add_classified_counts_to_summary(df, summary, classifier):
 
 def add_host_counts_to_summary(df, summary, classifier, prefix):
     df_host = df[df["classification"] == "human"]
+    # Only a sample of the host reads may have been mapped (--host_eval_reads). Reads which were not
+    # sampled have no mapping result, so they must not be counted as unmapped.
+    if "host_sampled" in df_host.columns:
+        df_host = df_host[df_host["host_sampled"].astype(bool)]
+    summary[f"num_host_sampled_{classifier}"] = df_host.shape[0]
+    summary[f"num_host_not_sampled_{classifier}"] = summary[f"num_host_{classifier}"] - df_host.shape[0]
     host_total = df_host.shape[0]
 
     #5. Of the host reads, what proportion map back to the host reference genome, or EBV (minimap2 T2T+EBV)?
@@ -510,6 +526,12 @@ def main():
         help="SAM file of mapping results from host-extracted file",
     )
     parser.add_argument(
+        "--host_sampled_ids",
+        dest="host_sampled_ids",
+        required=False,
+        help="File of read ids (one per line) of the host reads which were mapped. Host reads not listed were not sampled and are excluded from the host mapping proportions",
+    )
+    parser.add_argument(
         "--microbial_sam",
         dest="microbial_sam",
         required=False,
@@ -578,6 +600,8 @@ def main():
         
         classifier_df['ref_name'] = classifier_df['ref_name'].fillna("")
         classifier_df["unmapped"] = classifier_df["mapped_length"].isna()
+        sampled_ids = load_sampled_ids(args.host_sampled_ids)
+        classifier_df["host_sampled"] = True if sampled_ids is None else classifier_df["read_id"].isin(sampled_ids)
         for column in ["taxids", "names", "human_accs"]:
             classifier_df[column] = classifier_df[column].fillna("")
         classifier_df["blast_human"] = classifier_df["blast_human"].fillna(False).astype(bool)

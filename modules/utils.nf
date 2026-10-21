@@ -104,7 +104,7 @@ process minimap2_host {
         tuple val(unique_id), val(method), path(fastq)
         path refs
     output:
-        tuple val(unique_id), path("${unique_id}.${method}.host.sam")
+        tuple val(unique_id), path("${unique_id}.${method}.host.sam"), path("${unique_id}.${method}.host_sampled.txt")
     script:
         if ( params.evaluate_host == true ) {
             preset = ""
@@ -116,11 +116,13 @@ process minimap2_host {
             """
             # head closes the pipe once it has enough reads, which gives zcat SIGPIPE (141) under pipefail
             zcat -f ${fastq} | head -n ${params.host_eval_reads * 4} > small.fq || [ \$? -eq 141 ]
+            # the reads which are mapped, so that the others are not counted as unmapped
+            awk 'NR%4==1 {print substr(\$1,2)}' small.fq > "${unique_id}.${method}.host_sampled.txt"
             minimap2 -ax ${preset} ${refs} small.fq --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > "${unique_id}.${method}.host.sam"
             """
         } else {
             """
-            touch "${unique_id}.${method}.host.sam"
+            touch "${unique_id}.${method}.host.sam" "${unique_id}.${method}.host_sampled.txt"
             """
         }
 }
@@ -258,7 +260,7 @@ process evaluate_summary {
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy'
 
     input:
-    tuple val(unique_id), val(classifier), path(report), path(host_sam), path(microbial_sam), path(blast_result)
+    tuple val(unique_id), val(classifier), path(report), path(host_sam), path(host_sampled_ids), path(microbial_sam), path(blast_result)
     path(contaminant_accs)
 
     output:
@@ -277,6 +279,7 @@ process evaluate_summary {
       -i ${report} \
       --microbial_sam ${microbial_sam} \
       --host_sam ${host_sam} \
+      --host_sampled_ids ${host_sampled_ids} \
       --blast_result ${blast_result} \
       --classifier ${classifier} \
       --sample_id ${unique_id} \
