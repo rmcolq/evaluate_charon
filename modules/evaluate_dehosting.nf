@@ -9,7 +9,7 @@ include { evaluate_summary } from '../modules/utils'
 // [id, classifier, report, host_sam, host_sampled_ids, microbial_sam, blast_result]
 // When blast is not run, an empty placeholder is used (evaluate.py treats an empty file as no hits).
 def build_eval_ch(method) {
-    def no_blast = file("${projectDir}/assets/NO_FILE", checkIfExists: true)
+    def no_blast = file("${projectDir}/resources/NO_BLAST", checkIfExists: true)
     def eval_ch = method.report
                     .combine(method.host_sam, by: 0)
                     .combine(method.microbial_sam, by: 0)
