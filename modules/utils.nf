@@ -117,18 +117,30 @@ workflow minimap2_microbial {
     refs
 
     main:
+    def empty_sam = file("${projectDir}/resources/empty.sam", type: "file", checkIfExists: true)
+
+    // A sample with no microbial reads (e.g. a human sample) has no chunks, so nothing would reach the
+    // summary and the sample would never finish. Give it an empty result instead.
     fastq_ch.map{unique_id, method, fastq -> [unique_id, method, fastq.splitFastq(by: params.chunk_size, file:true)]}
-            .transpose()
-            .set{chunked_fastq_ch}
+            .branch{ unique_id, method, chunks ->
+                with_reads: chunks.size() > 0
+                no_reads: true
+            }
+            .set{ split_ch }
+    split_ch.with_reads.transpose().set{chunked_fastq_ch}
     minimap2_microbial_chunk(chunked_fastq_ch, refs)
     minimap2_microbial_chunk.out.set{ chunk_sam_ch }
     minimap2_microbial_chunk.out.groupTuple(by: [0,1]).set{collected_sam}
     cat_all_microbial_sam_files(collected_sam)
-    cat_all_microbial_sam_files.out.set{ sam_ch }
-    
+    cat_all_microbial_sam_files.out
+        .mix( split_ch.no_reads.map{ unique_id, method, chunks -> [unique_id, empty_sam] } )
+        .set{ sam_ch }
+    split_ch.no_reads.map{ unique_id, method, chunks -> [unique_id, method] }.set{ no_reads }
+
     emit:
     chunk_sam_ch
     sam_ch
+    no_reads
 }
 
 process minimap2_host {

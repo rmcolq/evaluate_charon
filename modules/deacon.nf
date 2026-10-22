@@ -90,7 +90,10 @@ workflow evaluate_deacon {
 
     if ( params.evaluate_microbial ){
         verify_microbial_host_hits(minimap2_microbial.out.chunk_sam_ch)
-        verify_microbial_host_hits.out.set{ blast_ch }
+        // samples with no microbial reads have no BLAST step, so give them an empty result
+        verify_microbial_host_hits.out
+            .mix(minimap2_microbial.out.no_reads.map{ unique_id, method -> [unique_id, file("${projectDir}/resources/NO_BLAST")] })
+            .set{ blast_ch }
     } else {
         blast_ch = Channel.empty()
     }
