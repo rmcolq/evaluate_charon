@@ -2,6 +2,21 @@
 Nextflow pipeline to run charon and collect statistics
 
 
+## Prebuilt minimap2 index
+
+Every mapping task builds the minimap2 index of the reference from the FASTA, which needs several times
+more memory than mapping (about 12 GB for a human reference) and repeats the work for every task. Build the
+index once and reuse it:
+
+```
+nextflow run main.nf -entry build_mmi_index --refs <reference.fa.gz> --outdir <dir> -profile <profile>
+```
+
+This writes `<reference>.map-ont.mmi` (or `.sr.mmi` with `--read_type illumina`) to `--outdir`. Then run the
+pipeline with `--refs_mmi <reference>.map-ont.mmi`; it is used instead of `--refs` for all mapping steps. The
+index has to be built with the same preset the pipeline maps with, which the entry workflow takes from
+`--read_type`. Mapping to the index gives the same alignments as mapping to the FASTA.
+
 ## Leak tiers
 
 Reads called microbial are assigned a `leak_tier` in the per-sample outputs (`*_leaks.parquet`, `*_full.csv`).

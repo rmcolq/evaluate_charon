@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-include { minimap2_microbial; minimap2_host; verify_microbial_host_hits } from '../modules/utils'
+include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; mapping_reference } from '../modules/utils'
 
 process download_nohuman_index {
     label "process_single"
@@ -75,7 +75,7 @@ workflow evaluate_nohuman {
     main:
 
     download_nohuman_index()
-    refs = file("$projectDir/${params.refs}", type: "file", checkIfExists:true)
+    refs = mapping_reference()
 
     run_nohuman(fastq_ch, download_nohuman_index.out)
     collect_classifications(run_nohuman.out.combined)

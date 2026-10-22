@@ -1,5 +1,24 @@
 #!/usr/bin/env nextflow
 
+// A path given as a parameter: absolute, or relative to the pipeline directory.
+def resolve_path(String path) {
+    // test the text, not file(path), which would already resolve a relative path against the launch directory
+    return (path.startsWith('/') || path.contains('://')) ? file(path) : file("${projectDir}/${path}")
+}
+
+// The reference minimap2 maps to: a prebuilt index (--refs_mmi) if given, otherwise the FASTA (--refs).
+// A prebuilt index avoids rebuilding the index in every mapping task, which needs several times more
+// memory than mapping (about 12 GB for a human reference).
+def mapping_reference() {
+    if (params.refs_mmi)
+        return file(resolve_path(params.refs_mmi), type: "file", checkIfExists: true)
+    return file(resolve_path(params.refs), type: "file", checkIfExists: true)
+}
+
+def minimap2_preset() {
+    return params.read_type == "illumina" ? "sr" : "map-ont"
+}
+
 process bam_to_fastq {
     label "process_medium"
     tag "${unique_id}"
@@ -38,6 +57,33 @@ process stage_fastq {
     """
 }
 
+process build_mmi {
+    // Builds the minimap2 index once (needs far more memory than mapping), so it can be reused with --refs_mmi.
+    // Run with: nextflow run main.nf -entry build_mmi_index --refs <fasta> -profile ...
+    label "process_high_memory"
+    label "process_high"
+    conda "bioconda::minimap2=2.28"
+    container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
+
+    publishDir "${params.outdir}/", mode: 'copy', pattern: "*.mmi"
+
+    input:
+        path refs
+    output:
+        path("${refs.simpleName}.${minimap2_preset()}.mmi")
+
+    script:
+        preset = minimap2_preset()
+        """
+        minimap2 -x ${preset} -t ${task.cpus} -d "${refs.simpleName}.${preset}.mmi" ${refs}
+        """
+}
+
+workflow build_mmi_index {
+    main:
+    build_mmi(file(resolve_path(params.refs), type: "file", checkIfExists: true))
+}
+
 process minimap2_microbial_chunk {
 
     label "process_medium"
@@ -53,12 +99,7 @@ process minimap2_microbial_chunk {
         tuple val(unique_id), val(method), path("microbial.${fastq.baseName}.mmp.sam")
     script:
         if ( params.evaluate_microbial ) {
-            preset = ""
-            if ( params.read_type == "illumina") {
-                preset = "sr"
-            } else {
-                preset = "map-ont"
-            }
+            preset = minimap2_preset()
             """
             minimap2 -ax ${preset} ${refs} ${fastq} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > microbial.${fastq.baseName}.mmp.sam
             """
@@ -107,12 +148,7 @@ process minimap2_host {
         tuple val(unique_id), path("${unique_id}.${method}.host.sam"), path("${unique_id}.${method}.host_sampled.txt")
     script:
         if ( params.evaluate_host == true ) {
-            preset = ""
-            if ( params.read_type == "illumina") {
-                preset = "sr"
-            } else {
-                preset = "map-ont"
-            }
+            preset = minimap2_preset()
             """
             # head closes the pipe once it has enough reads, which gives zcat SIGPIPE (141) under pipefail
             zcat -f ${fastq} | head -n ${params.host_eval_reads * 4} > small.fq || [ \$? -eq 141 ]

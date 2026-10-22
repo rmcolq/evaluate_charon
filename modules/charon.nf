@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-include { minimap2_microbial; minimap2_host; verify_microbial_host_hits } from '../modules/utils'
+include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; mapping_reference } from '../modules/utils'
 
 // name labels the comparator (charon or charon_host_only) in all outputs. microbial_category is the extracted
 // category holding the reads to keep: "microbial" for a normal index, "non_host" for a host-only index.
@@ -145,7 +145,7 @@ workflow evaluate_charon {
         microbial_category
     main:
 
-    refs = file("$projectDir/${params.refs}", type: "file", checkIfExists:true)
+    refs = mapping_reference()
 
     run_charon(fastq_ch, db, name, microbial_category)
     minimap2_microbial(run_charon.out.microbial_fastq, refs)

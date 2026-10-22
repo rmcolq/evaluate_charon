@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-include { minimap2_microbial; minimap2_host; verify_microbial_host_hits } from '../modules/utils'
+include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; mapping_reference } from '../modules/utils'
 
 process download_deacon_index {
     label "process_single"
@@ -81,7 +81,7 @@ workflow evaluate_deacon {
         extra_args
     main:
 
-    refs = file("$projectDir/${params.refs}", type: "file", checkIfExists:true)
+    refs = mapping_reference()
 
     run_deacon(fastq_ch, deacon_index, name, extra_args)
     collect_classifications(run_deacon.out.combined)
