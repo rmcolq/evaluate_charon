@@ -8,7 +8,7 @@ process run_charon {
     label "process_medium_plus_mem"
     label "process_long"
     tag "${unique_id}"
-    container { name == "charon_host_only" ? params.charon_host_only_container : params.charon_container }
+    container params.charon_container 
     maxForks 4
 
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
@@ -44,7 +44,7 @@ process run_charon_chunk {
 
     label "process_medium_plus_mem"
     label "process_long"
-    container 'docker.io/rmcolq/charon:v1.1.2'
+    container params.charon_container
     maxForks 4
 
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
