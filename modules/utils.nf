@@ -127,12 +127,23 @@ workflow minimap2_microbial {
                 no_reads: true
             }
             .set{ split_ch }
-    split_ch.with_reads.transpose().set{chunked_fastq_ch}
+    // Each chunk carries its sample's chunk count (groupKey) so that groupTuple can emit a sample as soon as
+    // its own chunks are done. Without it, groupTuple waits for the whole channel to close, which never
+    // happens while later samples are held back by the sample gate, so the sample never finishes.
+    // This workflow is called once per method, so grouping on the sample alone is enough.
+    split_ch.with_reads
+        .map{ unique_id, method, chunks -> [groupKey(unique_id, chunks.size()), method, chunks] }
+        .transpose()
+        .set{chunked_fastq_ch}
     minimap2_microbial_chunk(chunked_fastq_ch, refs)
     minimap2_microbial_chunk.out.set{ chunk_sam_ch }
-    minimap2_microbial_chunk.out.groupTuple(by: [0,1]).set{collected_sam}
+    minimap2_microbial_chunk.out
+        .groupTuple()
+        .map{ unique_id, methods, sams -> [unique_id, methods[0], sams] }
+        .set{collected_sam}
     cat_all_microbial_sam_files(collected_sam)
     cat_all_microbial_sam_files.out
+        .map{ unique_id, sam -> [unique_id.toString(), sam] }
         .mix( split_ch.no_reads.map{ unique_id, method, chunks -> [unique_id, empty_sam] } )
         .set{ sam_ch }
     split_ch.no_reads.map{ unique_id, method, chunks -> [unique_id, method] }.set{ no_reads }
@@ -252,6 +263,24 @@ process blastn_microbial_host_hits {
     """
 }
 
+process merge_blast_results {
+
+    label "process_single"
+    tag "${unique_id}"
+    publishDir "${params.outdir}/intermediate/", mode: 'copy'
+
+    input:
+    tuple val(unique_id), val(method), path(results, stageAs: "chunk_*.txt")
+
+    output:
+    tuple val(unique_id), path("${unique_id}.${method}.results_blastn.txt")
+
+    script:
+    """
+    cat chunk_*.txt > "${unique_id}.${method}.results_blastn.txt"
+    """
+}
+
 process cat_all_microbial_sam_files {
 
     label "process_low"
@@ -291,9 +320,15 @@ workflow verify_microbial_host_hits {
             blast_db = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true) // any file will do to not block
 
         blastn_microbial_host_hits(extract_microbial_host_hits.out, blast_db)
-        blastn_microbial_host_hits.out.collectFile (storeDir: "${params.outdir}/intermediate") { unique_id, method, result -> ["${unique_id}.${method}.results_blastn.txt", result.text]}
-                                      .map { f -> [f.simpleName, f] }
-                                      .set{ blast_ch }
+        // groupTuple on the sample's groupKey (see minimap2_microbial) rather than collectFile, which, like an
+        // unsized groupTuple, only emits once the whole channel has closed
+        blastn_microbial_host_hits.out
+            .groupTuple()
+            .map{ unique_id, methods, results -> [unique_id, methods[0], results] }
+            | merge_blast_results
+        merge_blast_results.out
+            .map{ unique_id, result -> [unique_id.toString(), result] }
+            .set{ blast_ch }
 
     emit:
         blast_ch
