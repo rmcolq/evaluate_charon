@@ -6,15 +6,6 @@ def resolve_path(String path) {
     return (path.startsWith('/') || path.contains('://')) ? file(path) : file("${projectDir}/${path}")
 }
 
-// The reference minimap2 maps to: a prebuilt index (--refs_mmi) if given, otherwise the FASTA (--refs).
-// A prebuilt index avoids rebuilding the index in every mapping task, which needs several times more
-// memory than mapping (about 12 GB for a human reference).
-def mapping_reference() {
-    if (params.refs_mmi)
-        return file(resolve_path(params.refs_mmi), type: "file", checkIfExists: true)
-    return file(resolve_path(params.refs), type: "file", checkIfExists: true)
-}
-
 def minimap2_preset() {
     return params.read_type == "illumina" ? "sr" : "map-ont"
 }
@@ -57,31 +48,45 @@ process stage_fastq {
     """
 }
 
-process build_mmi {
-    // Builds the minimap2 index once (needs far more memory than mapping), so it can be reused with --refs_mmi.
-    // Run with: nextflow run main.nf -entry build_mmi_index --refs <fasta> -profile ...
+// The minimap2 index of the reference is built once and kept in the store dir, so every mapping task loads it
+// instead of rebuilding it from the FASTA. Building needs far more memory than mapping (about 12 GB for a human
+// reference), so on a laptop build it outside Docker and copy it to the path logged at the start of the run.
+// The size of the reference is in the name, so a changed reference is indexed again rather than using a stale index.
+process minimap2_index {
     label "process_high_memory"
     label "process_high"
     conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
-
-    publishDir "${params.outdir}/", mode: 'copy', pattern: "*.mmi"
+    storeDir "${params.store_dir}/minimap2/"
+    maxForks 1
 
     input:
         path refs
+        val index_name
     output:
-        path("${refs.simpleName}.${minimap2_preset()}.mmi")
+        path(index_name)
 
     script:
-        preset = minimap2_preset()
         """
-        minimap2 -x ${preset} -t ${task.cpus} -d "${refs.simpleName}.${preset}.mmi" ${refs}
+        minimap2 -x ${minimap2_preset()} -t ${task.cpus} -d "${index_name}" ${refs}
         """
 }
 
-workflow build_mmi_index {
+// Indexes the reference once for all methods. Nothing is built when no mapping is evaluated.
+workflow mapping_index {
     main:
-    build_mmi(file(resolve_path(params.refs), type: "file", checkIfExists: true))
+    if ( params.evaluate_host || params.evaluate_microbial ) {
+        refs = file(resolve_path(params.refs), type: "file", checkIfExists: true)
+        index_name = "${refs.simpleName}.${refs.size()}.${minimap2_preset()}.mmi"
+        log.info "minimap2 index: ${file(params.store_dir).toAbsolutePath()}/minimap2/${index_name} (built if missing)"
+        minimap2_index(refs, index_name)
+        index_ch = minimap2_index.out.first()
+    } else {
+        index_ch = Channel.value(file("${projectDir}/assets/NO_FILE", checkIfExists: true))
+    }
+
+    emit:
+    index = index_ch
 }
 
 process minimap2_microbial_chunk {

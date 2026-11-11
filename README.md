@@ -2,20 +2,22 @@
 Nextflow pipeline to run charon and collect statistics
 
 
-## Prebuilt minimap2 index
+## minimap2 index of the reference
 
-Every mapping task builds the minimap2 index of the reference from the FASTA, which needs several times
-more memory than mapping (about 12 GB for a human reference) and repeats the work for every task. Build the
-index once and reuse it:
+Mapping to `--refs` uses a minimap2 index which is built once and kept in `<store_dir>/minimap2/`, so that mapping tasks
+load it instead of rebuilding it from the FASTA. The first run which maps (`--evaluate_host` or `--evaluate_microbial`)
+builds it, later runs and all methods reuse it, and the path is printed at the start of the run. The size of the
+reference is part of the name, so a changed reference is indexed again. `--store_dir` should be an absolute path.
+
+Building needs far more memory than mapping (about 12 GB for a human reference), and the index step runs in the same
+container with the same memory limit as other steps. On a machine without that memory, such as a laptop, build the index
+natively instead and copy it to the logged path:
 
 ```
-nextflow run main.nf -entry build_mmi_index --refs <reference.fa.gz> --outdir <dir> -profile <profile>
+minimap2 -x map-ont -t 8 -d <store_dir>/minimap2/<name from the log> <reference.fa.gz>
 ```
 
-This writes `<reference>.map-ont.mmi` (or `.sr.mmi` with `--read_type illumina`) to `--outdir`. Then run the
-pipeline with `--refs_mmi <reference>.map-ont.mmi`; it is used instead of `--refs` for all mapping steps. The
-index has to be built with the same preset the pipeline maps with, which the entry workflow takes from
-`--read_type`. Mapping to the index gives the same alignments as mapping to the FASTA.
+The preset has to match the one the pipeline maps with, `map-ont` or `sr` with `--read_type illumina`.
 
 ## Leak tiers
 

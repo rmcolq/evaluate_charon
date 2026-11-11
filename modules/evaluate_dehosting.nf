@@ -3,7 +3,7 @@ include { evaluate_charon as evaluate_charon_host_only } from '../modules/charon
 include { evaluate_deacon; download_deacon_index } from '../modules/deacon'
 include { evaluate_deacon as evaluate_deacon_sensitive } from '../modules/deacon'
 include { evaluate_nohuman } from '../modules/nohuman'
-include { evaluate_summary } from '../modules/utils'
+include { evaluate_summary; mapping_index } from '../modules/utils'
 
 // Combine the pieces for one method into the tuple evaluate_summary expects:
 // [id, classifier, report, host_sam, host_sampled_ids, microbial_sam, blast_result]
@@ -28,14 +28,18 @@ workflow evaluate_dehosting {
     main:
     eval_ch = Channel.empty()
 
+    // the minimap2 index of the reference, built once (or found in the store dir) for every method
+    mapping_index()
+    refs = mapping_index.out.index
+
     if (params.charon){
-      evaluate_charon(fastq_ch, file(params.db, type: "file", checkIfExists: true), "charon", "microbial")
+      evaluate_charon(fastq_ch, file(params.db, type: "file", checkIfExists: true), "charon", "microbial", refs)
       eval_ch = eval_ch.mix(build_eval_ch(evaluate_charon.out))
     }
 
     if (params.charon_host_only){
       // charon with an index of the host only, so reads are called host or not host; the not host reads are kept
-      evaluate_charon_host_only(fastq_ch, file(params.db_host_only, type: "file", checkIfExists: true), "charon_host_only", "non_host")
+      evaluate_charon_host_only(fastq_ch, file(params.db_host_only, type: "file", checkIfExists: true), "charon_host_only", "non_host", refs)
       eval_ch = eval_ch.mix(build_eval_ch(evaluate_charon_host_only.out))
     }
 
@@ -45,18 +49,18 @@ workflow evaluate_dehosting {
     }
 
     if (params.deacon){
-      evaluate_deacon(fastq_ch, download_deacon_index.out, "deacon", "")
+      evaluate_deacon(fastq_ch, download_deacon_index.out, "deacon", "", refs)
       eval_ch = eval_ch.mix(build_eval_ch(evaluate_deacon.out))
     }
 
     if (params.deacon_sensitive){
       // high sensitivity host depletion: absolute threshold of 1 and no relative threshold
-      evaluate_deacon_sensitive(fastq_ch, download_deacon_index.out, "deacon_sensitive", "-a 1 -r 0")
+      evaluate_deacon_sensitive(fastq_ch, download_deacon_index.out, "deacon_sensitive", "-a 1 -r 0", refs)
       eval_ch = eval_ch.mix(build_eval_ch(evaluate_deacon_sensitive.out))
     }
 
     if (params.nohuman){
-      evaluate_nohuman(fastq_ch)
+      evaluate_nohuman(fastq_ch, refs)
       eval_ch = eval_ch.mix(build_eval_ch(evaluate_nohuman.out))
     }
 
