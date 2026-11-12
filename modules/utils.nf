@@ -49,8 +49,9 @@ process stage_fastq {
 }
 
 // The minimap2 index of the reference is built once and kept in the store dir, so every mapping task loads it
-// instead of rebuilding it from the FASTA. Building needs far more memory than mapping (about 12 GB for a human
-// reference), so on a laptop build it outside Docker and copy it to the path logged at the start of the run.
+// instead of rebuilding it from the FASTA. Natively a human-sized index takes about 2 minutes and 3.5 GB, but in an
+// emulated or small-memory container (e.g. amd64 on Apple Silicon) it can be very slow or be killed, so on a laptop
+// build it natively and copy it to the path logged at the start of the run.
 // The size of the reference is in the name, so a changed reference is indexed again rather than using a stale index.
 process minimap2_index {
     label "process_high_memory"

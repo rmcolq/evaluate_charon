@@ -9,9 +9,9 @@ load it instead of rebuilding it from the FASTA. The first run which maps (`--ev
 builds it, later runs and all methods reuse it, and the path is printed at the start of the run. The size of the
 reference is part of the name, so a changed reference is indexed again. `--store_dir` should be an absolute path.
 
-Building needs far more memory than mapping (about 12 GB for a human reference), and the index step runs in the same
-container with the same memory limit as other steps. On a machine without that memory, such as a laptop, build the index
-natively instead and copy it to the logged path:
+Building a human-sized index natively takes about 2 minutes and 3.5 GB of memory (minimap2 2.26, 8 threads). The index step
+runs in a container like the other steps, and under emulation or a small memory limit, such as an amd64 container on Apple
+Silicon, it can be very slow or be killed. In that case build the index natively and copy it to the logged path:
 
 ```
 minimap2 -x map-ont -t 8 -d <store_dir>/minimap2/<name from the log> <reference.fa.gz>
