@@ -61,10 +61,11 @@ workflow throttle_samples {
     sample_ch
 
     main:
-    sample_ch.map{ id, f -> [id, f.toUriString()] }
+    // a sample's reads are one file, or a list of two for paired reads
+    sample_ch.map{ id, f -> [id, f instanceof List ? f.collect{ it.toUriString() } : f.toUriString()] }
              .set{ source_ch }
     acquire_slot(source_ch)
-    acquire_slot.out.map{ id, uri -> [id, file(uri, checkIfExists: true)] }
+    acquire_slot.out.map{ id, uri -> [id, uri instanceof List ? uri.collect{ file(it, checkIfExists: true) } : file(uri, checkIfExists: true)] }
                     .set{ gated_ch }
 
     emit:

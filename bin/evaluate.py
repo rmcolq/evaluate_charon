@@ -80,8 +80,12 @@ def load_contaminant_accs(path):
                     accs.append(acc)
     return accs
 
+MAP_COLUMNS = ["read_id","ref","ref_name","pos","ref_start","ref_end","mapped_length","mismatches","identity","divergence","seq_length","gc_ratio","5mer_ratio","sam_mean_quality","A","C","G","T","mapped_prop","mates_mapped"]
+
 def load_map_info_from_sam(sam):
-    processed_read_ids = set()
+    # One entry per read name. For paired reads both mates share a name, and the pair is described by the
+    # mate with the longer alignment; mates_mapped says how many of the pair mapped.
+    best = {}
     sys.stderr.write("LOAD MAP INFO FROM: " + sam + "\n")
     if (os.path.getsize(sam) > 0):
         map_details = []
@@ -89,12 +93,10 @@ def load_map_info_from_sam(sam):
         in_sam = Reader(in_file)
         for x in in_sam:
             read_id, status, ref, pos, ref_coords, mapped_length = x.qname, x.flag, x.rname, x.pos, x.coords, len(x)
-            if status not in [0, 16]:
+            # skip unmapped (0x4), secondary (0x100) and supplementary (0x800) alignments. For single-end reads
+            # that leaves flags 0 and 16, as before; for pairs it keeps the primary alignment of each mate.
+            if status & 0x904:
                 continue
-            if read_id in processed_read_ids:
-                continue
-            else:
-                processed_read_ids.add(read_id)
             mismatches, divergence =  x.tags["NM"], x.tags["de"]
             ref_name = None
             if ref in ebv_accs:
@@ -113,13 +115,22 @@ def load_map_info_from_sam(sam):
             for motif in ["A","C","G","T"]:
                 entry[motif] = x.gapped('seq').count(motif)
             entry["mapped_prop"] = entry["mapped_length"] / entry["seq_length"]
-            map_details.append(entry)
-            if len(map_details) % 10000 == 0:
-                sys.stderr.write("Processed " + str(len(map_details)) + "\n")
-        df = pd.DataFrame(map_details)
+            entry["mates_mapped"] = 1
+            if read_id in best:
+                other = best[read_id]
+                if entry["mapped_length"] > other["mapped_length"]:
+                    entry["mates_mapped"] = other["mates_mapped"] + 1
+                    best[read_id] = entry
+                else:
+                    other["mates_mapped"] += 1
+            else:
+                best[read_id] = entry
+            if len(best) % 10000 == 0:
+                sys.stderr.write("Processed " + str(len(best)) + "\n")
+        # a SAM with a header but no alignments still needs the columns
+        df = pd.DataFrame(list(best.values()), columns=MAP_COLUMNS)
     else:
-        columns = ["read_id","ref","ref_name","pos","ref_start","ref_end","mapped_length","mismatches","identity","divergence","seq_length","gc_ratio","5mer_ratio","sam_mean_quality","A","C","G","T","mapped_prop"]
-        df = pd.DataFrame(columns=columns)
+        df = pd.DataFrame(columns=MAP_COLUMNS)
     sys.stderr.write("Found " + str(df.shape)  + " entries\n")
     return df
 
