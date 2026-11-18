@@ -10,16 +10,51 @@ def resolve_path(String path) {
 // A prebuilt index avoids rebuilding the index in every mapping task, which needs several times more
 // memory than mapping (about 12 GB for a human reference).
 def mapping_reference() {
-    if (params.refs_mmi)
-        return file(resolve_path(params.refs_mmi), type: "file", checkIfExists: true)
+    if (params.refs_mmi) {
+        def mmi = file(resolve_path(params.refs_mmi), type: "file", checkIfExists: true)
+        // an index made with another preset is silently overridden by minimap2, so refuse it
+        def built_with = (mmi.name =~ /\.(map-ont|sr)\.mmi$/)
+        if (built_with && built_with[0][1] != minimap2_preset())
+            error "--refs_mmi was built with the ${built_with[0][1]} preset but this run maps with ${minimap2_preset()} (paired and --read_type illumina use sr). Rebuild it with build_mmi_index and the matching --read_type/--paired."
+        return mmi
+    }
     return file(resolve_path(params.refs), type: "file", checkIfExists: true)
 }
 
+// Paired reads (--paired) are short reads. A run is either all paired or all single-end.
 def minimap2_preset() {
-    return params.read_type == "illumina" ? "sr" : "map-ont"
+    return (params.paired || params.read_type == "illumina") ? "sr" : "map-ont"
+}
+
+// Reads travel through the pipeline as one channel item: a single file, or a list of two files (R1, R2)
+// for paired reads. Each process works out which it has from the shape of its input.
+def is_paired(reads) {
+    return reads instanceof List
+}
+
+// Prefix of charon's output files: the sample for a pair, the file name for single-end reads
+def reads_prefix(unique_id, reads) {
+    return is_paired(reads) ? "${unique_id}" : reads.baseName
+}
+
+// The first (or only) file of a set of reads
+def first_file(reads) {
+    return is_paired(reads) ? reads[0] : reads
+}
+
+// Glob of the extracted reads files for a category: one file, or _1 and _2 for a pair
+def reads_glob(prefix, category, reads) {
+    return is_paired(reads) ? "${prefix}_${category}_?.f*q.gz" : "${prefix}_${category}.f*q.gz"
+}
+
+// Name of the first (or only) reads file without its extensions
+def reads_name(reads) {
+    return is_paired(reads) ? reads[0].baseName : reads.baseName
 }
 
 process bam_to_fastq {
+    // Reads from a BAM or CRAM. With --paired the file holds read pairs, which are written as R1/R2 FASTQ
+    // (reads without a mate are dropped). A CRAM needs its reference, --cram_ref.
     label "process_medium"
     tag "${unique_id}"
     conda "bioconda::samtools=1.21"
@@ -28,19 +63,31 @@ process bam_to_fastq {
 
     input:
     tuple val(unique_id), path(bam)
+    path(cram_ref)
 
     output:
-    tuple val(unique_id), path("${bam.baseName}.fastq")
+    tuple val(unique_id), path(params.paired ? "${unique_id}_R*.fastq.gz" : "${bam.baseName}.fastq")
 
     script:
-    """
-    samtools fastq ${bam} > "${bam.baseName}.fastq"
-    """
+    def ref = cram_ref.name == "NO_FILE" ? "" : "-T ${cram_ref}"
+    if (params.paired) {
+        """
+        # primary alignments only, grouped by read name so that mates are adjacent
+        samtools view -u ${ref} -F 0x900 ${bam} \
+          | samtools collate -O -u - \
+          | samtools fastq -n -1 "${unique_id}_R1.fastq.gz" -2 "${unique_id}_R2.fastq.gz" -0 /dev/null -s /dev/null -
+        """
+    } else {
+        """
+        samtools fastq ${ref} ${bam} > "${bam.baseName}.fastq"
+        """
+    }
 }
 
 process stage_fastq {
     // Remote (e.g. s3://) inputs are downloaded by Nextflow into this task's work dir once,
     // rather than separately by every classifier. Eager cleanup removes it after last use.
+    // Takes one file or a pair; a pair keeps its order (R1 then R2) because the names sort that way.
     label "process_single"
     tag "${unique_id}"
     maxForks 2
@@ -49,11 +96,11 @@ process stage_fastq {
     tuple val(unique_id), path(fastq)
 
     output:
-    tuple val(unique_id), path("staged_${fastq}")
+    tuple val(unique_id), path("staged_*")
 
     script:
     """
-    mv ${fastq} staged_${fastq}
+    for f in ${fastq}; do mv "\$f" "staged_\$f"; done
     """
 }
 
@@ -96,19 +143,30 @@ process minimap2_microbial_chunk {
         tuple val(unique_id), val(method), path(fastq)
         path refs
     output:
-        tuple val(unique_id), val(method), path("microbial.${fastq.baseName}.mmp.sam")
+        tuple val(unique_id), val(method), path("microbial.${reads_name(fastq)}.mmp.sam")
     script:
+        // fastq is one file, or R1 and R2 of a pair (mapped together, so each pair is mapped once)
         if ( params.evaluate_microbial ) {
             preset = minimap2_preset()
             """
-            minimap2 -ax ${preset} ${refs} ${fastq} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > microbial.${fastq.baseName}.mmp.sam
+            minimap2 -ax ${preset} ${refs} ${fastq} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > microbial.${reads_name(fastq)}.mmp.sam
             """
         } else {
             """
-            touch "microbial.${fastq.baseName}.mmp.sam"
+            touch "microbial.${reads_name(fastq)}.mmp.sam"
             """
         }
-        
+
+}
+
+// Split a reads file, or a pair, into chunks of params.chunk_size reads. For a pair, R1 and R2 are split
+// the same way, so chunk i of each holds the same read pairs.
+def split_reads(reads) {
+    if (!is_paired(reads))
+        return reads.splitFastq(by: params.chunk_size, file: true)
+    def r1 = reads[0].splitFastq(by: params.chunk_size, file: true)
+    def r2 = reads[1].splitFastq(by: params.chunk_size, file: true)
+    return [r1, r2].transpose()
 }
 
 workflow minimap2_microbial {
@@ -121,7 +179,8 @@ workflow minimap2_microbial {
 
     // A sample with no microbial reads (e.g. a human sample) has no chunks, so nothing would reach the
     // summary and the sample would never finish. Give it an empty result instead.
-    fastq_ch.map{unique_id, method, fastq -> [unique_id, method, fastq.splitFastq(by: params.chunk_size, file:true)]}
+    // Chunks are lists of one file, or of two files (R1, R2) with the same reads, for paired reads
+    fastq_ch.map{unique_id, method, fastq -> [unique_id, method, split_reads(fastq)]}
             .branch{ unique_id, method, chunks ->
                 with_reads: chunks.size() > 0
                 no_reads: true
@@ -170,14 +229,21 @@ process minimap2_host {
     output:
         tuple val(unique_id), path("${unique_id}.${method}.host.sam"), path("${unique_id}.${method}.host_sampled.txt")
     script:
+        // fastq is one file, or R1 and R2 of a pair. host_eval_reads counts reads, or pairs for paired reads.
         if ( params.evaluate_host == true ) {
             preset = minimap2_preset()
+            inputs = is_paired(fastq) ? "small_1.fq small_2.fq" : "small.fq"
             """
             # head closes the pipe once it has enough reads, which gives zcat SIGPIPE (141) under pipefail
-            zcat -f ${fastq} | head -n ${params.host_eval_reads * 4} > small.fq || [ \$? -eq 141 ]
+            i=0
+            for f in ${fastq}; do
+              i=\$((i+1))
+              zcat -f \$f | head -n ${params.host_eval_reads * 4} > small_\$i.fq || [ \$? -eq 141 ]
+            done
+            ${is_paired(fastq) ? "" : "mv small_1.fq small.fq"}
             # the reads which are mapped, so that the others are not counted as unmapped
-            awk 'NR%4==1 {print substr(\$1,2)}' small.fq > "${unique_id}.${method}.host_sampled.txt"
-            minimap2 -ax ${preset} ${refs} small.fq --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > "${unique_id}.${method}.host.sam"
+            awk 'NR%4==1 {print substr(\$1,2)}' ${is_paired(fastq) ? "small_1.fq" : "small.fq"} | sed 's#/[12]\$##' > "${unique_id}.${method}.host_sampled.txt"
+            minimap2 -ax ${preset} ${refs} ${inputs} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > "${unique_id}.${method}.host.sam"
             """
         } else {
             """
@@ -205,7 +271,8 @@ process extract_microbial_host_hits {
     samtools view -S -b ${sam_file} | samtools sort - -o ${sam_file.baseName}.sorted.bam
     samtools index ${sam_file.baseName}.sorted.bam
     samtools view -L ${ref_bed} ${sam_file.baseName}.sorted.bam -b -o out.bam
-    samtools fasta out.bam > "query.fasta"
+    # -n keeps the read name as it is (no /1 /2), so BLAST hits match the classifier's read ids
+    samtools fasta -n out.bam > "query.fasta"
     """
 }
 
@@ -299,7 +366,7 @@ process cat_all_microbial_sam_files {
     cat \$(ls *.mmp.sam | head -n1) > "${unique_id}.${method}.microbial.sam"
     for sam in \$(ls *.mmp.sam | tail -n+2)
       do
-        cat \$sam | tail -n+34 >> "${unique_id}.${method}.microbial.sam"
+        grep -v '^@' \$sam >> "${unique_id}.${method}.microbial.sam" || true
       done
     """
 }

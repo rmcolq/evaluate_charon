@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; mapping_reference } from '../modules/utils'
+include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; mapping_reference; is_paired; reads_prefix; reads_glob; first_file } from '../modules/utils'
 
 process download_nohuman_index {
     label "process_single"
@@ -28,15 +28,26 @@ process run_nohuman {
     path(nohuman_index)
 
     output:
-    tuple val(unique_id), val("nohuman"), path("nohuman_${unique_id}_microbial.fq.gz"), emit: microbial_fastq
-    tuple val(unique_id), val("nohuman"), path("nohuman_${unique_id}_human.fq.gz"), emit: human_fastq
-    tuple val(unique_id), path("nohuman_${unique_id}_microbial.fq.gz"), path("nohuman_${unique_id}_human.fq.gz"),  emit: combined
+    tuple val(unique_id), val("nohuman"), path("${nohuman_out(unique_id, 'microbial', fastq)}"), emit: microbial_fastq
+    tuple val(unique_id), val("nohuman"), path("${nohuman_out(unique_id, 'human', fastq)}"), emit: human_fastq
+    tuple val(unique_id), path("${nohuman_out(unique_id, 'microbial', fastq)}"), path("${nohuman_out(unique_id, 'human', fastq)}"),  emit: combined
 
     script:
+    // fastq is one file, or R1 and R2 of a pair
+    def outputs = { category ->
+        is_paired(fastq) ?
+            "--out1 nohuman_${unique_id}_${category}_1.fq.gz --out2 nohuman_${unique_id}_${category}_2.fq.gz" :
+            "-o nohuman_${unique_id}_${category}.fq.gz"
+    }
     """
-    nohuman --db ${nohuman_index} -t ${task.cpus} -o "nohuman_${unique_id}_microbial.fq.gz" ${fastq}
-    nohuman --human --db ${nohuman_index} -t ${task.cpus} -o "nohuman_${unique_id}_human.fq.gz" ${fastq}
+    nohuman --db ${nohuman_index} -t ${task.cpus} ${outputs('microbial')} ${fastq}
+    nohuman --human --db ${nohuman_index} -t ${task.cpus} ${outputs('human')} ${fastq}
     """
+}
+
+// Output file(s) of a category: one file, or _1 and _2 for a pair
+def nohuman_out(unique_id, category, reads) {
+    return is_paired(reads) ? "nohuman_${unique_id}_${category}_?.fq.gz" : "nohuman_${unique_id}_${category}.fq.gz"
 }
 
 process collect_classifications {
@@ -55,8 +66,9 @@ process collect_classifications {
 
     script:
     """
-    cat ${host_fastq}  | gunzip | awk 'NR%4==1 {print substr(\$1,2)}' > list_host
-    cat ${microbial_fastq}  | gunzip | awk 'NR%4==1 {print substr(\$1,2)}' > list_microbial
+    # one id per read, or per pair (taken from R1)
+    cat ${first_file(host_fastq)}  | gunzip | awk 'NR%4==1 {print substr(\$1,2)}' | sed 's#/[12]\$##' > list_host
+    cat ${first_file(microbial_fastq)}  | gunzip | awk 'NR%4==1 {print substr(\$1,2)}' | sed 's#/[12]\$##' > list_microbial
     echo -e "read_id\tclassification" > "${unique_id}.nohuman.out"
     for id in \$(cat list_microbial)
       do
