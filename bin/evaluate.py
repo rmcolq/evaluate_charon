@@ -260,17 +260,22 @@ def load_charon_output(path, classifier="charon"):
             entry[f"{category}_unique_prop"] = float(prop_unique_hits)
         entries.append(entry)
     df =  pd.DataFrame(entries)
+    # Reads removed before classification (too short, or too low quality) have status F. They are in the table so
+    # that every input read is accounted for, but they were never classified and have no compression, so keep them
+    # out of the host/microbial/unclassified counts and of the distributions the other reads are compared to.
+    classified = df["status"] != "F"
     if classifier.endswith("_host_only"):
         # With a host-only index a read is either called host or not. Reads which are not called host are kept,
         # so treat them as microbial classified, as for the other host depletion tools.
-        df["status"] = "C"
-        df["classification"] = np.where(df["classification"] == "human", "human", "microbial")
+        df.loc[classified, "status"] = "C"
+        df.loc[classified, "classification"] = np.where(df.loc[classified, "classification"] == "human", "human", "microbial")
     df[classifier] = df["classification"].fillna("unclassified")
+    df.loc[~classified, classifier] = "filtered"
     df['classification'] = df['classification'].fillna("")
 
     for column in ["mean_quality", "length", "compression"]:
-        m = df[column].mean()
-        sd = df[column].std()
+        m = df.loc[classified, column].mean()
+        sd = df.loc[classified, column].std()
         df[f"{column}_num_stds"] = (df[column]-m)/sd
     return df
 
@@ -315,7 +320,11 @@ def add_classified_counts_to_summary(df, summary, classifier):
     else:
         summary[f"num_unclassified_{classifier}"] = 0
 
+    # reads removed before classification: reported, but not part of the total the proportions are taken over
+    summary[f"num_filtered_{classifier}"] = int((df["status"] == "F").sum())
+
     summary["total"] = summary[f"num_host_{classifier}"] + summary[f"num_microbial_{classifier}"] + summary[f"num_unclassified_{classifier}"]
+    summary["total_with_filtered"] = summary["total"] + summary[f"num_filtered_{classifier}"]
     summary[f"classified_{classifier}"] = summary[f"num_host_{classifier}"] + summary[f"num_microbial_{classifier}"]
 
     #2. Scale these to proportions
