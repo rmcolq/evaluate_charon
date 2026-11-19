@@ -94,8 +94,7 @@ process stage_fastq {
 // build it natively and copy it to the path logged at the start of the run.
 // The size of the reference is in the name, so a changed reference is indexed again rather than using a stale index.
 process minimap2_index {
-    label "process_high_memory"
-    label "process_high"
+    label "process_medium"
     conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
     storeDir "${params.store_dir}/minimap2/"
