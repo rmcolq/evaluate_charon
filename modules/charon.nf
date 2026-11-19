@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; mapping_reference; is_paired; reads_prefix; reads_glob } from '../modules/utils'
+include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; is_paired; reads_prefix; reads_glob } from '../modules/utils'
 
 // name labels the comparator (charon or charon_host_only) in all outputs. microbial_category is the extracted
 // category holding the reads to keep: "microbial" for a normal index, "non_host" for a host-only index.

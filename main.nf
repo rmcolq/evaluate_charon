@@ -1,5 +1,5 @@
 include { bam_to_fastq } from './modules/utils'
-include { stage_fastq; build_mmi_index; resolve_path } from './modules/utils'
+include { stage_fastq; resolve_path } from './modules/utils'
 include { evaluate_dehosting } from './modules/evaluate_dehosting'
 include { throttle_samples; release_finished_samples } from './modules/gate'
 

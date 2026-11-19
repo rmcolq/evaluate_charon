@@ -121,7 +121,7 @@ workflow mapping_index {
         index_name = "${refs.simpleName}.${refs.size()}.${minimap2_preset()}.mmi"
         log.info "minimap2 index: ${file(params.store_dir).toAbsolutePath()}/minimap2/${index_name} (built if missing)"
         minimap2_index(refs, index_name)
-        index_ch = minimap2_index.out.first()
+        index_ch = minimap2_index.out
     } else {
         index_ch = Channel.value(file("${projectDir}/assets/NO_FILE", checkIfExists: true))
     }

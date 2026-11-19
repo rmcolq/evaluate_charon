@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; mapping_reference; is_paired; reads_prefix; reads_glob; first_file } from '../modules/utils'
+include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; is_paired; reads_prefix; reads_glob; first_file } from '../modules/utils'
 
 process download_deacon_index {
     label "process_single"
