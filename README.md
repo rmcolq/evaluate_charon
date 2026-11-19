@@ -1,7 +1,6 @@
 # evaluate_charon
 Nextflow pipeline to run charon and collect statistics
 
-
 ## Paired reads (Illumina)
 
 Add `--paired true` and give paired input, one of:
@@ -13,25 +12,27 @@ Add `--paired true` and give paired input, one of:
 
 A BAM/CRAM is converted to R1/R2 FASTQ (primary alignments, reads without a mate dropped). Paths can be local or
 `s3://`. Each pair travels through the pipeline as one item: charon, deacon and nohuman take both files and call
-the pair together, and minimap2 maps pairs with the short-read `sr` preset (so a prebuilt `--refs_mmi` must be built
-with `--paired true` or `--read_type illumina`; a mismatched one is refused). `--host_eval_reads` counts pairs. In
+the pair together, and minimap2 maps pairs with the short-read `sr` preset (the stored minimap2 index is named by
+preset, so paired and `--read_type illumina` runs build and keep their own). `--host_eval_reads` counts pairs. In
 the evaluation a pair is described by its longer alignment, and `mates_mapped` records how many mates mapped.
 Mixed paired and single-end input in one run is not supported, and `--fastq_dir` does not take pairs.
 
-## Prebuilt minimap2 index
+## Build and store minimap2 index of the reference
 
-Every mapping task builds the minimap2 index of the reference from the FASTA, which needs several times
-more memory than mapping (about 12 GB for a human reference) and repeats the work for every task. Build the
-index once and reuse it:
+Mapping to `--refs` uses a minimap2 index which is built once and kept in `<store_dir>/minimap2/`, so that mapping tasks
+load it instead of rebuilding it from the FASTA. The first run which maps (`--evaluate_host` or `--evaluate_microbial`)
+builds it, later runs and all methods reuse it, and the path is printed at the start of the run. The size of the
+reference is part of the name, so a changed reference is indexed again. `--store_dir` should be an absolute path.
+
+Building a human-sized index natively takes about 2 minutes and 3.5 GB of memory (minimap2 2.26, 8 threads). The index step
+runs in a container like the other steps, and under emulation or a small memory limit, such as an amd64 container on Apple
+Silicon, it can be very slow or be killed. In that case build the index natively and copy it to the logged path:
 
 ```
-nextflow run main.nf -entry build_mmi_index --refs <reference.fa.gz> --outdir <dir> -profile <profile>
+minimap2 -x map-ont -t 8 -d <store_dir>/minimap2/<name from the log> <reference.fa.gz>
 ```
 
-This writes `<reference>.map-ont.mmi` (or `.sr.mmi` with `--read_type illumina`) to `--outdir`. Then run the
-pipeline with `--refs_mmi <reference>.map-ont.mmi`; it is used instead of `--refs` for all mapping steps. The
-index has to be built with the same preset the pipeline maps with, which the entry workflow takes from
-`--read_type`. Mapping to the index gives the same alignments as mapping to the FASTA.
+The preset has to match the one the pipeline maps with, `map-ont` or `sr` with `--read_type illumina`.
 
 ## Leak tiers
 
