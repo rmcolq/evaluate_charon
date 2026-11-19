@@ -39,9 +39,6 @@ workflow {
     if (params.charon_host_only && !params.db_host_only) {
         exit 1, "Please provide --db_host_only (a charon index of the host only) when running Nextflow with --charon_host_only."
     }
-    if (params.charon_host_only && !params.charon_host_only_container) {
-        exit 1, "Please provide --charon_host_only_container, a charon image which supports a host-only index, when running with --charon_host_only."
-    }
 
     // Paired reads: from a BAM/CRAM of pairs (--bam_csv), or FASTQ pairs (--fastq_pairs_csv, or --fastq and --fastq2).
     // --paired also selects the short read mapping preset, so it has to be given with them.
