@@ -47,7 +47,21 @@ Each tier is a subset of the one above:
 | 4 | Tier 3 and the best human bitscore is at least `--blast_bitscore_ratio` times the best non-human bitscore (human-specific, not a shared region) |
 
 Tier 4 needs `--evaluate_microbial` with `--blast_nonhuman` (the default), which adds a BLAST search with human (taxid 9606)
-excluded and so needs a local `--blast_db` that includes the taxonomy files.
+excluded.
+
+BLAST searches the reads which were called microbial and map to the human reference. With `--blast_db` (a directory holding
+`nt` and the taxonomy files) the search is local. Without it the search is remote, against NCBI, which is slow and
+rate limited, so the pipeline keeps requests small and tolerant of failures:
+
+- reads are sent in chunks of `--blast_chunk_reads` (default 20), one chunk at a time for a remote search;
+- each search is tried up to five times with a growing wait;
+- `--blast_max_reads` (default: all) searches a fixed random sample of that many reads per sample and method;
+- results are kept per read in `<store_dir>/blast_cache/<sample>` (`--blast_cache false` keeps them in the task instead), so a
+  read which leaked in several methods, or in an earlier run, is only searched once. `--store_dir` should be an absolute path
+  on a filesystem every task can see;
+- a read whose search still fails is written as `failed` and gets `blast_failed = true` in the leak tables. It is counted in
+  `num_microbial_map_host_blast_failed_<classifier>` and is neither verified nor shown to be non-human. The run does not stop and
+  the summary is still written.
 
 Real contaminants such as Mycoplasma should be added to the reference in `--refs`, and their accessions listed (whitespace or
 comma separated) in a file passed with `--contaminant_accs`, so that they are not scored as human leaks.
