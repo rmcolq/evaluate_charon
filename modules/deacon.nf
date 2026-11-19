@@ -4,7 +4,7 @@ include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; is_pair
 process download_deacon_index {
     label "process_single"
     storeDir "${params.store_dir}/deacon/"
-    container 'community.wave.seqera.io/library/deacon:0.19.1--895b1fa7c4a50130'
+    container 'community.wave.seqera.io/library/deacon:0.20.0--903cc7096f1e9938'
     maxForks 1
 
     output:
@@ -20,7 +20,7 @@ process run_deacon {
 
     label "process_medium"
     tag "${unique_id}"
-    container 'community.wave.seqera.io/library/deacon:0.19.1--895b1fa7c4a50130'
+    container 'community.wave.seqera.io/library/deacon:0.20.0--903cc7096f1e9938'
     maxForks 2
 
     input:
@@ -57,7 +57,7 @@ process collect_classifications {
 
     label "process_low"
     tag "${unique_id}"
-    container 'community.wave.seqera.io/library/deacon:0.19.1--895b1fa7c4a50130'
+    container 'community.wave.seqera.io/library/deacon:0.20.0--903cc7096f1e9938'
 
     publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
 
