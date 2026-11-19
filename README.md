@@ -1,8 +1,23 @@
 # evaluate_charon
 Nextflow pipeline to run charon and collect statistics
 
+## Paired reads (Illumina)
 
-## minimap2 index of the reference
+Add `--paired true` and give paired input, one of:
+
+| Input | Option |
+| --- | --- |
+| BAM/CRAM of read pairs (e.g. 1000 Genomes high-coverage CRAM) | `--bam_csv` (`sample_id,filepath`), plus `--cram_ref <reference.fa>` for a CRAM |
+| FASTQ pairs | `--fastq_pairs_csv` (`sample_id,fastq_1,fastq_2`), or `--fastq` with `--fastq2` and `--unique_id` |
+
+A BAM/CRAM is converted to R1/R2 FASTQ (primary alignments, reads without a mate dropped). Paths can be local or
+`s3://`. Each pair travels through the pipeline as one item: charon, deacon and nohuman take both files and call
+the pair together, and minimap2 maps pairs with the short-read `sr` preset (so a prebuilt `--refs_mmi` must be built
+with `--paired true` or `--read_type illumina`; a mismatched one is refused). `--host_eval_reads` counts pairs. In
+the evaluation a pair is described by its longer alignment, and `mates_mapped` records how many mates mapped.
+Mixed paired and single-end input in one run is not supported, and `--fastq_dir` does not take pairs.
+
+## Build and store minimap2 index of the reference
 
 Mapping to `--refs` uses a minimap2 index which is built once and kept in `<store_dir>/minimap2/`, so that mapping tasks
 load it instead of rebuilding it from the FASTA. The first run which maps (`--evaluate_host` or `--evaluate_microbial`)

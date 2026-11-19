@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-include { minimap2_microbial; minimap2_host; verify_microbial_host_hits } from '../modules/utils'
+include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; mapping_reference; is_paired; reads_prefix; reads_glob } from '../modules/utils'
 
 // name labels the comparator (charon or charon_host_only) in all outputs. microbial_category is the extracted
 // category holding the reads to keep: "microbial" for a normal index, "non_host" for a host-only index.
@@ -21,18 +21,19 @@ process run_charon {
     val(microbial_category)
 
     output:
-    tuple val(unique_id), val(name), path("${fastq.baseName}_${microbial_category}.f*q.gz"), emit: microbial_fastq
-    tuple val(unique_id), val(name), path("${fastq.baseName}_human.f*q.gz"), emit: human_fastq
+    tuple val(unique_id), val(name), path("${reads_glob(reads_prefix(unique_id, fastq), microbial_category, fastq)}"), emit: microbial_fastq
+    tuple val(unique_id), val(name), path("${reads_glob(reads_prefix(unique_id, fastq), 'human', fastq)}"), emit: human_fastq
     tuple val(unique_id), val(name), path("${unique_id}_${name}.out"),  emit: result
 
     script:
+    // fastq is one file, or R1 and R2 of a pair (charon takes both and calls the pair together)
     """
     charon dehost ${fastq} \
       --db ${db} \
       --confidence 7 \
       --log charon_${unique_id}.log \
       --extract all \
-      --prefix ${fastq.baseName} \
+      --prefix ${reads_prefix(unique_id, fastq)} \
       -t ${task.cpus} \
       --max-memory ${(task.memory.toGiga() * 0.8) as int} \
       > ${unique_id}_${name}.out
