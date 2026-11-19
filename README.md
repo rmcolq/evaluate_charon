@@ -1,6 +1,18 @@
 # evaluate_charon
 Nextflow pipeline to run charon and collect statistics
 
+## Environment
+
+`environment.yml` has Nextflow (with Java) and the Python packages for the analysis scripts in `scripts/`:
+
+```
+conda env create -f environment.yml
+conda activate evaluate_charon
+```
+
+The pipeline's own processes run in containers, so Docker (`-profile docker`) is needed as well. The environment has not
+been solved on every platform: if a package fails to resolve, relax its version in the file.
+
 ## Paired reads (Illumina)
 
 Add `--paired true` and give paired input, one of:

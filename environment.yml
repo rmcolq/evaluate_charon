@@ -1,0 +1,24 @@
+# Environment for running the pipeline and the analysis scripts in scripts/:
+#   conda env create -f environment.yml && conda activate evaluate_charon
+# The pipeline's processes run in containers (-profile docker), so Docker (or Singularity) is needed on top of this.
+name: evaluate_charon
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.10,<3.13
+  # Nextflow needs Java 17 or newer
+  - openjdk>=17
+  - nextflow>=24.04
+  # scripts/*.py: leak_regions, compare_common, plot_leak_ideogram, plot_leak_by_chromosome
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib-base
+  - python-duckdb
+  - pyarrow
+  # bin/evaluate.py (also run inside the pipeline's own container)
+  - pip
+  - pip:
+      - simplesam
+      - taxoniq
