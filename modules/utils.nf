@@ -429,6 +429,8 @@ process evaluate_summary {
       --microbial_sam ${microbial_sam} \
       --host_sam ${host_sam} \
       --host_sampled_ids ${host_sampled_ids} \
+      ${params.evaluate_host ? "" : "--no_host_mapping"} \
+      ${params.evaluate_microbial ? "" : "--no_microbial_mapping"} \
       --blast_result ${blast_result} \
       --classifier ${classifier} \
       --sample_id ${unique_id} \

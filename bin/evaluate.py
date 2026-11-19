@@ -335,8 +335,18 @@ def add_classified_counts_to_summary(df, summary, classifier):
 
     return summary
 
-def add_host_counts_to_summary(df, summary, classifier, prefix):
+def add_host_counts_to_summary(df, summary, classifier, prefix, host_mapped=True):
     df_host = df[df["classification"] == "human"]
+    if not host_mapped:
+        # Host reads were not mapped (--evaluate_host off), so there is no mapping result to report: every host
+        # read would show as unmapped. Leave the mapping columns empty instead of reporting that.
+        for name in ["sampled", "not_sampled", "unmapped", "map_ebv", "map_host"]:
+            summary[f"num_host_{name}_{classifier}"] = None
+        for name in ["unmapped", "map_ebv", "map_host"]:
+            summary[f"prop_host_{name}_{classifier}"] = None
+        df_host.iloc[0:0].to_csv(Path(f"{prefix}_host_data.csv"), index=False)
+        return
+
     # Only a sample of the host reads may have been mapped (--host_eval_reads). Reads which were not
     # sampled have no mapping result, so they must not be counted as unmapped.
     if "host_sampled" in df_host.columns:
@@ -361,17 +371,27 @@ def add_host_counts_to_summary(df, summary, classifier, prefix):
         summary[f"prop_host_map_ebv_{classifier}"] = summary[f"num_host_map_ebv_{classifier}"]/host_total
         summary[f"prop_host_map_host_{classifier}"] = summary[f"num_host_map_host_{classifier}"]/host_total
     else:
-        summary[f"prop_host_unmapped_{classifier}"] = 0
-        summary[f"prop_host_map_ebv_{classifier}"] = 0
-        summary[f"prop_host_map_host_{classifier}"] = 0
+        # no host reads were mapped, so the proportions are undefined
+        summary[f"prop_host_unmapped_{classifier}"] = None
+        summary[f"prop_host_map_ebv_{classifier}"] = None
+        summary[f"prop_host_map_host_{classifier}"] = None
 
     data_file = Path(f"{prefix}_host_data.csv")
     host_host_df.to_csv(data_file, index=False)
     return
 
-def add_microbial_counts_to_summary(df, summary, classifier, prefix):
+def add_microbial_counts_to_summary(df, summary, classifier, prefix, microbial_mapped=True):
     df_microbial = df[df["classification"] == "microbial"]
     microbial_total = df_microbial.shape[0]
+    if not microbial_mapped:
+        # Microbial reads were not mapped or BLASTed (--evaluate_microbial off), so there is no result to report:
+        # every microbial read would show as unmapped. Leave the mapping columns empty instead of reporting that.
+        for name in ["unmapped", "map_ebv", "map_host", "map_host_verified"]:
+            summary[f"num_microbial_{name}_{classifier}"] = None
+            summary[f"prop_microbial_{name}_{classifier}"] = None
+        empty = df_microbial.iloc[0:0]
+        empty.to_csv(Path(f"{prefix}_microbial_data.csv"), index=False)
+        return empty
 
     #6. Of the microbial reads, what proportion map back to the host reference genome, or EBV?
     microbial_unmapped_df = df_microbial[df_microbial["unmapped"] == True]
@@ -480,26 +500,31 @@ def add_leak_tiers(df, min_blast_cov, min_blast_pident, bitscore_ratio):
     df["leak_tier"] = microbial.astype(int) + t2.astype(int) + t3.astype(int) + t4.astype(int)
     return df
 
-def add_leak_tiers_to_summary(df, summary, classifier):
+def add_leak_tiers_to_summary(df, summary, classifier, microbial_mapped=True):
     total = max(df.shape[0], 1)
     for tier in [1, 2, 3, 4]:
+        if tier > 1 and not microbial_mapped:
+            # tiers 2-4 need the microbial reads mapped (and BLASTed), so they were not assessed
+            summary[f"num_leak_tier{tier}_{classifier}"] = None
+            summary[f"leaks_per_million_tier{tier}_{classifier}"] = None
+            continue
         n = int((df["leak_tier"] >= tier).sum())
         summary[f"num_leak_tier{tier}_{classifier}"] = n
         summary[f"leaks_per_million_tier{tier}_{classifier}"] = n / total * 1e6
 
-def generate_summary(df, prefix, classifier):
+def generate_summary(df, prefix, classifier, host_mapped=True, microbial_mapped=True):
     sys.stderr.write("GENERATE SUMMARY\n")
     summary = {}
 
     add_classified_counts_to_summary(df, summary, classifier)
 
-    add_host_counts_to_summary(df, summary, classifier, prefix)
+    add_host_counts_to_summary(df, summary, classifier, prefix, host_mapped)
 
-    microbial_host_df = add_microbial_counts_to_summary(df, summary, classifier, prefix)
+    microbial_host_df = add_microbial_counts_to_summary(df, summary, classifier, prefix, microbial_mapped)
     check_related_taxa(microbial_host_df, classifier, prefix)
     check_human_accs(microbial_host_df, classifier, prefix)
 
-    add_leak_tiers_to_summary(df, summary, classifier)
+    add_leak_tiers_to_summary(df, summary, classifier, microbial_mapped)
 
     if classifier == "charon":
         add_unclassified_to_summary(df, summary)
@@ -544,6 +569,18 @@ def main():
         dest="host_sam",
         required=False,
         help="SAM file of mapping results from host-extracted file",
+    )
+    parser.add_argument(
+        "--no_host_mapping",
+        dest="no_host_mapping",
+        action="store_true",
+        help="Host reads were not mapped (the host SAM is a placeholder), so leave the host mapping columns of the summary empty",
+    )
+    parser.add_argument(
+        "--no_microbial_mapping",
+        dest="no_microbial_mapping",
+        action="store_true",
+        help="Microbial reads were not mapped or BLASTed (the microbial SAM and BLAST result are placeholders), so leave the microbial mapping columns and leak tiers 2-4 of the summary empty",
     )
     parser.add_argument(
         "--host_sampled_ids",
@@ -622,6 +659,10 @@ def main():
         classifier_df["unmapped"] = classifier_df["mapped_length"].isna()
         sampled_ids = load_sampled_ids(args.host_sampled_ids)
         classifier_df["host_sampled"] = True if sampled_ids is None else classifier_df["read_id"].isin(sampled_ids)
+        if args.no_host_mapping:
+            classifier_df["host_sampled"] = False
+        # without microbial mapping, leak_tier is 1 for every microbial read because tiers 2-4 were not assessed
+        classifier_df["microbial_mapped"] = not args.no_microbial_mapping
         for column in ["taxids", "names", "human_accs"]:
             classifier_df[column] = classifier_df[column].fillna("")
         classifier_df["blast_human"] = classifier_df["blast_human"].fillna(False).astype(bool)
@@ -639,7 +680,8 @@ def main():
 
     write_compact_tables(classifier_df, args.prefix)
 
-    summary = generate_summary(classifier_df, args.prefix, classifier)
+    summary = generate_summary(classifier_df, args.prefix, classifier, host_mapped=not args.no_host_mapping,
+                               microbial_mapped=not args.no_microbial_mapping)
 
     # Save to CSV
     fieldnames = ["sample_id"] + list(summary.keys())

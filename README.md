@@ -46,6 +46,11 @@ Each tier is a subset of the one above:
 | 3 | Tier 2 and a BLAST human hit with `--blast_min_cov` query coverage and `--blast_min_pident` identity |
 | 4 | Tier 3 and the best human bitscore is at least `--blast_bitscore_ratio` times the best non-human bitscore (human-specific, not a shared region) |
 
+Tiers 2-4 need the microbial reads mapped, which `--evaluate_microbial` switches on. Without it only tier 1 is
+measured: the summary leaves the `*_microbial_unmapped/map_ebv/map_host/map_host_verified` and tier 2-4 columns empty
+(they are not zero), and `microbial_mapped` is `False` in the per-read tables. Likewise, without `--evaluate_host` the
+`*_host_sampled/unmapped/map_ebv/map_host` columns are empty.
+
 Tier 4 needs `--evaluate_microbial` with `--blast_nonhuman` (the default), which adds a BLAST search with human (taxid 9606)
 excluded and so needs a local `--blast_db` that includes the taxonomy files.
 
