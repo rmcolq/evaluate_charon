@@ -54,7 +54,7 @@ workflow {
 
     if (params.bam_csv){
         Channel.fromPath("${params.bam_csv}")
-            .splitCsv( header: true )
+            .splitCsv( header: true, quote: '"' )
             .map{ row -> [row.sample_id,file(row.filepath, type: "file", checkIfExists:true)]}
             .set{ bam_ch }
         // a CRAM needs the reference it was aligned to; a BAM (or an unaligned file) does not
@@ -65,7 +65,7 @@ workflow {
         done_ch = evaluate_dehosting.out.done
     } else if (params.fastq_pairs_csv){
         Channel.fromPath("${params.fastq_pairs_csv}")
-            .splitCsv( header: true )
+            .splitCsv( header: true, quote: '"' )
             .map{ row -> [row.sample_id, [file(row.fastq_1, type: "file", checkIfExists:true), file(row.fastq_2, type: "file", checkIfExists:true)]]}
             .set{ pairs_ch }
         throttle_samples(pairs_ch)
