@@ -308,7 +308,7 @@ process split_blast_queries {
 }
 
 // BLAST one chunk of reads. A remote search can fail (connection errors, rate limits), so each search is tried up to
-// five times with a growing wait. Results are kept per read in a cache directory (<store_dir>/blast_cache/<sample>,
+// five times with a growing wait, and a remote search is abandoned after --blast_remote_timeout. Results are kept per read in a cache directory (<store_dir>/blast_cache/<sample>,
 // or inside the task if --blast_cache is false), so a read which leaked in several methods, or in an earlier run, is
 // only searched once. A read still unsearched after the last attempt is written as a "failed<TAB>read_id" line;
 // the task itself does not fail, so the summary is always produced and the read is reported as not searched.
@@ -336,8 +336,10 @@ process blastn_microbial_host_hits {
     // Best hit is chosen by bitscore downstream, so keep enough targets that human hits do not crowd out the rest.
     // The second search excludes human (taxid 9606) to find the best non-human hit; every line is prefixed
     // with the search it came from ("all" or "nonhuman").
-    search_all = "blastn -query todo.fasta ${dbopts} -out all.txt -evalue 1e-6 -perc_identity 85 -max_target_seqs ${params.blast_max_targets} -outfmt ${outfmt}"
-    search_nonhuman = params.blast_nonhuman ? "&& blastn -query todo.fasta ${dbopts} -out nonhuman.txt -negative_taxids 9606 -evalue 1e-6 -perc_identity 85 -max_target_seqs ${params.blast_max_targets} -outfmt ${outfmt}" : ""
+    // a remote search that never answers would otherwise hold the task forever; a timed out search counts as a failed attempt
+    limit = remote ? params.blast_remote_timeout : "24h"
+    search_all = "timeout ${limit} blastn -query todo.fasta ${dbopts} -out all.txt -evalue 1e-6 -perc_identity 85 -max_target_seqs ${params.blast_max_targets} -outfmt ${outfmt}"
+    search_nonhuman = params.blast_nonhuman ? "&& timeout ${limit} blastn -query todo.fasta ${dbopts} -out nonhuman.txt -negative_taxids 9606 -evalue 1e-6 -perc_identity 85 -max_target_seqs ${params.blast_max_targets} -outfmt ${outfmt}" : ""
     result_files = params.blast_nonhuman ? "all.txt nonhuman.txt" : "all.txt"
     wait_between = remote ? "sleep \$((attempt * 60))" : "true"
     """
