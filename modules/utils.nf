@@ -275,6 +275,43 @@ process extract_microbial_host_hits {
     """
 }
 
+// Reads are searched in small chunks, so a remote search does not send NCBI one huge request. The reads are
+// unique, optionally capped at --blast_max_reads (a random sample, the same every run), and written as chunks of
+// --blast_chunk_reads reads. There is always at least one (possibly empty) chunk, so every sample gets a result.
+process split_blast_queries {
+
+    label "process_single"
+    tag "${unique_id}"
+    conda "bioconda::blast=2.16.0"
+    container "ncbi/blast"
+
+    input:
+    tuple val(unique_id), val(method), path(fasta_file)
+
+    output:
+    tuple val(unique_id), val(method), path("chunk_*.fasta")
+
+    script:
+    cap = params.blast_max_reads ? "shuf --random-source=<(yes) -n ${params.blast_max_reads} reads.tsv > capped.tsv" : "cp reads.tsv capped.tsv"
+    """
+    # one line per read (id, sequence), unique ids; the FASTA may be wrapped
+    awk 'BEGIN{RS=">"; FS="\\n"} NR>1 { id=\$1; sub(/[ \\t].*/, "", id); seq=""; for (i=2; i<=NF; i++) seq=seq \$i; if (!(id in seen)) { seen[id]=1; print id "\\t" seq } }' ${fasta_file} > reads.tsv
+    ${cap}
+    split -l ${params.blast_chunk_reads} -d -a 4 capped.tsv chunk_ || true
+    for f in chunk_*; do
+      [ -e "\$f" ] || continue
+      awk -F'\\t' '{print ">" \$1 "\\n" \$2}' "\$f" > "\$f.fasta"
+      rm "\$f"
+    done
+    ls chunk_*.fasta > /dev/null 2>&1 || : > chunk_0000.fasta
+    """
+}
+
+// BLAST one chunk of reads. A remote search can fail (connection errors, rate limits), so each search is tried up to
+// five times with a growing wait. Results are kept per read in a cache directory (<store_dir>/blast_cache/<sample>,
+// or inside the task if --blast_cache is false), so a read which leaked in several methods, or in an earlier run, is
+// only searched once. A read still unsearched after the last attempt is written as a "failed<TAB>read_id" line;
+// the task itself does not fail, so the summary is always produced and the read is reported as not searched.
 process blastn_microbial_host_hits {
 
     label "process_medium_plus_mem"
@@ -282,6 +319,7 @@ process blastn_microbial_host_hits {
     label "process_long"
     conda "bioconda::blast=2.16.0"
     container "ncbi/blast"
+    maxForks params.blast_db ? 4 : 1
 
     input:
     tuple val(unique_id), val(method), path(fasta_file)
@@ -291,41 +329,56 @@ process blastn_microbial_host_hits {
     tuple val(unique_id), val(method), path("results_blastn.txt")
 
     script:
-    if (params.blast_db){
-        db = "${blast_db}/nt -num_threads 4"
-    } else {
-        db = "nt -remote"
-    }
+    remote = !params.blast_db
+    dbopts = remote ? "-db nt -remote" : "-db ${blast_db}/nt -num_threads 4"
+    cache = params.blast_cache ? "${file(params.store_dir).toAbsolutePath()}/blast_cache/${unique_id}" : "\$PWD/blast_cache"
+    outfmt = '"6 qseqid sacc sscinames staxids sstart send evalue pident length bitscore qcovs"'
     // Best hit is chosen by bitscore downstream, so keep enough targets that human hits do not crowd out the rest.
     // The second search excludes human (taxid 9606) to find the best non-human hit; every line is prefixed
     // with the search it came from ("all" or "nonhuman").
-    nonhuman = ""
-    if (params.blast_nonhuman) {
-        nonhuman = """
-      blastn -query ${fasta_file} \\
-        -db ${db} \\
-        -out nonhuman.txt \\
-        -negative_taxids 9606 \\
-        -evalue 1e-6 \\
-        -perc_identity 85 \\
-        -max_target_seqs ${params.blast_max_targets} \\
-        -outfmt "6 qseqid sacc sscinames staxids sstart send evalue pident length bitscore qcovs"
-      awk 'BEGIN{FS=OFS="\\t"} {print "nonhuman", \$0}' nonhuman.txt >> results_blastn.txt
-        """
-    }
+    search_all = "blastn -query todo.fasta ${dbopts} -out all.txt -evalue 1e-6 -perc_identity 85 -max_target_seqs ${params.blast_max_targets} -outfmt ${outfmt}"
+    search_nonhuman = params.blast_nonhuman ? "&& blastn -query todo.fasta ${dbopts} -out nonhuman.txt -negative_taxids 9606 -evalue 1e-6 -perc_identity 85 -max_target_seqs ${params.blast_max_targets} -outfmt ${outfmt}" : ""
+    result_files = params.blast_nonhuman ? "all.txt nonhuman.txt" : "all.txt"
+    wait_between = remote ? "sleep \$((attempt * 60))" : "true"
     """
-    : > results_blastn.txt
-    if [ -s ${fasta_file} ]; then
-      blastn -query ${fasta_file} \\
-        -db ${db} \\
-        -out all.txt \\
-        -evalue 1e-6 \\
-        -perc_identity 85 \\
-        -max_target_seqs ${params.blast_max_targets} \\
-        -outfmt "6 qseqid sacc sscinames staxids sstart send evalue pident length bitscore qcovs"
-      awk 'BEGIN{FS=OFS="\\t"} {print "all", \$0}' all.txt >> results_blastn.txt
-      ${nonhuman}
+    set -u
+    CACHE="${cache}"
+    mkdir -p "\$CACHE"
+    safe() { printf '%s' "\$1" | sed 's/[^A-Za-z0-9._-]/_/g'; }
+    ids() { grep '^>' "\$1" | sed 's/^>//; s/[ \\t].*//' || true; }
+
+    # reads without a finished search in the cache
+    : > todo.fasta
+    awk -v cache="\$CACHE" 'BEGIN{RS=">"; ORS=""} NR>1 { id=\$0; sub(/[ \\t\\n].*/, "", id); gsub(/[^A-Za-z0-9._-]/, "_", id); f=cache "/" id ".done"; if ((getline x < f) < 0) print ">" \$0; else close(f) }' ${fasta_file} > todo.fasta
+
+    if [ -s todo.fasta ]; then
+      ${remote ? "sleep 5" : "true"}
+      ok=0
+      for attempt in 1 2 3 4 5; do
+        rm -f all.txt nonhuman.txt
+        if ${search_all} ${search_nonhuman}; then ok=1; break; fi
+        echo "BLAST attempt \$attempt failed" >&2
+        ${wait_between}
+      done
+      if [ "\$ok" = 1 ]; then
+        ids todo.fasta | while read -r id; do rm -f "\$CACHE/\$(safe "\$id").txt"; done
+        for res in ${result_files}; do
+          prefix=\${res%.txt}
+          awk -v cache="\$CACHE" -v prefix="\$prefix" -F'\\t' '{ id=\$1; gsub(/[^A-Za-z0-9._-]/, "_", id); print prefix "\\t" \$0 >> (cache "/" id ".txt") }' "\$res"
+        done
+        ids todo.fasta | while read -r id; do : > "\$CACHE/\$(safe "\$id").done"; done
+      fi
     fi
+
+    : > results_blastn.txt
+    ids ${fasta_file} | while read -r id; do
+      f="\$CACHE/\$(safe "\$id")"
+      if [ -e "\$f.done" ]; then
+        if [ -f "\$f.txt" ]; then cat "\$f.txt" >> results_blastn.txt; fi
+      else
+        printf 'failed\\t%s\\n' "\$id" >> results_blastn.txt
+      fi
+    done
     """
 }
 
@@ -385,9 +438,16 @@ workflow verify_microbial_host_hits {
         else
             blast_db = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true) // any file will do to not block
 
-        blastn_microbial_host_hits(extract_microbial_host_hits.out, blast_db)
-        // groupTuple on the sample's groupKey (see minimap2_microbial) rather than collectFile, which, like an
-        // unsized groupTuple, only emits once the whole channel has closed
+        split_blast_queries(extract_microbial_host_hits.out)
+        // one item per chunk; the sample's groupKey carries the number of chunks, so the results of a sample are
+        // merged as soon as its own chunks are done
+        split_blast_queries.out
+            .flatMap{ unique_id, method, chunks ->
+                def chunk_list = chunks instanceof List ? chunks : [chunks]
+                chunk_list.collect{ [groupKey(unique_id, chunk_list.size()), method, it] }
+            }
+            .set{ blast_chunks_ch }
+        blastn_microbial_host_hits(blast_chunks_ch, blast_db)
         blastn_microbial_host_hits.out
             .groupTuple()
             .map{ unique_id, methods, results -> [unique_id, methods[0], results] }

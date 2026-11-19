@@ -136,7 +136,7 @@ def load_map_info_from_sam(sam):
 
 BLAST_COLUMNS = ["read_id", "taxids", "names", "human_accs", "blast_human", "pident", "top_hit",
                  "human_bitscore", "human_qcov", "human_pident", "nonhuman_bitscore", "nonhuman_qcov",
-                 "nonhuman_pident", "nonhuman_taxid", "nonhuman_name", "blast_nonhuman_run"]
+                 "nonhuman_pident", "nonhuman_taxid", "nonhuman_name", "blast_nonhuman_run", "blast_failed"]
 
 def is_human_hit(staxids):
     return "9606" in staxids.split(";")
@@ -166,9 +166,14 @@ def load_blast_info(blast_results):
     details = {}
     seen = set()
     nonhuman_run = False
+    failed_ids = set()
     with open(blast_results, 'r') as f:
         for line in f:
             if len(line.strip())==0:
+                continue
+            if line.startswith("failed\t"):
+                # the read could not be searched (e.g. a remote BLAST kept failing), so it has no BLAST result
+                failed_ids.add(line.rstrip("\n").split("\t")[1])
                 continue
             hit_set, parts = parse_blast_line(line)
             qseqid,sacc,sscinames,staxids,sstart,send,evalue,pident,length,bitscore,qcovs = parts
@@ -207,7 +212,13 @@ def load_blast_info(blast_results):
                     entry["blast_human"] = True
                     entry["human_accs"].append(f"{sacc}:{sstart}-{send}")
                     entry["pident"] = pident
+    for read_id in failed_ids - set(details):
+        details[read_id] = {"read_id":read_id, "taxids":[], "names":[], "human_accs":[], "blast_human":False,
+                        "pident":0, "top_hit":None, "human_bitscore":np.nan, "human_qcov":np.nan, "human_pident":np.nan,
+                        "nonhuman_bitscore":np.nan, "nonhuman_qcov":np.nan, "nonhuman_pident":np.nan,
+                        "nonhuman_taxid":None, "nonhuman_name":None}
     for entry in details.values():
+        entry["blast_failed"] = entry["read_id"] in failed_ids
         entry["taxids"] = ";".join(sorted(set(entry["taxids"])))
         entry["names"] = ";".join(sorted(set(entry["names"])))
         entry["human_accs"] = ";".join(sorted(set(entry["human_accs"])))
@@ -406,6 +417,9 @@ def add_microbial_counts_to_summary(df, summary, classifier, prefix, microbial_m
 
     microbial_host_verified_df = microbial_host_df[microbial_host_df["blast_human"]==True]
     summary[f"num_microbial_map_host_verified_{classifier}"] = microbial_host_verified_df.shape[0]
+    # reads whose BLAST search could not be completed: they are not verified, but not shown to be non-human either
+    blast_failed = microbial_host_df["blast_failed"].fillna(False).astype(bool) if "blast_failed" in microbial_host_df else pd.Series(False, index=microbial_host_df.index)
+    summary[f"num_microbial_map_host_blast_failed_{classifier}"] = int(blast_failed.sum())
 
     if microbial_total > 0:
         summary[f"prop_microbial_unmapped_{classifier}"] = summary[f"num_microbial_unmapped_{classifier}"]/microbial_total
@@ -667,6 +681,7 @@ def main():
             classifier_df[column] = classifier_df[column].fillna("")
         classifier_df["blast_human"] = classifier_df["blast_human"].fillna(False).astype(bool)
         classifier_df["blast_nonhuman_run"] = classifier_df["blast_nonhuman_run"].fillna(False).astype(bool)
+        classifier_df["blast_failed"] = classifier_df["blast_failed"].fillna(False).astype(bool)
 
         classifier_df["sample_id"] = sample_id
         classifier_df["classifier"] = classifier
