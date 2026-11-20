@@ -1,10 +1,11 @@
 #!/usr/bin/env nextflow
 include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; is_paired; reads_prefix; reads_glob } from '../modules/utils'
 
-// Charon holds the whole index in memory (7 GB for the full nanopore index, much more for the illumina one), and is
-// given 80% of this as --max-memory, so ask for twice the index size, and at least 16 GB. A retry doubles it.
+// Charon holds the whole index in memory (7 GB for the full nanopore index, 32 GB for the illumina one) and needs
+// only a little more than that. It is given 80% of the request as --max-memory, which must stay above the index
+// size, so ask for 1.5 times the index, and at least 16 GB. A retry doubles it.
 def charon_memory(db, attempt) {
-    def need = new nextflow.util.MemoryUnit(db.size() * 2)
+    def need = new nextflow.util.MemoryUnit((db.size() * 1.5) as long)
     return (need > 16.GB ? need : 16.GB) * attempt
 }
 
