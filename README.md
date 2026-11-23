@@ -71,7 +71,9 @@ BLAST searches the reads which were called microbial and map to the human refere
 rate limited, so the pipeline keeps requests small and tolerant of failures:
 
 - reads are sent in chunks of `--blast_chunk_reads` (default 20), one chunk at a time for a remote search;
-- each search is tried up to five times with a growing wait, and one attempt is abandoned after `--blast_remote_timeout` (default `20m`);
+- each search is tried up to five times with a growing wait. A remote search is abandoned after `--blast_remote_timeout` (default `20m`)
+  times the attempt number (20m, 40m, 60m, 80m, 100m), so a slow search gets longer on later attempts, and a search which
+  finished is not repeated;
 - `--blast_max_reads` (default: all) searches a fixed random sample of that many reads per sample and method;
 - results are kept per read in `<store_dir>/blast_cache/<sample>` (`--blast_cache false` keeps them in the task instead), so a
   read which leaked in several methods, or in an earlier run, is only searched once. `--store_dir` should be an absolute path

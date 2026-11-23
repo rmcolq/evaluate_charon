@@ -310,8 +310,10 @@ process split_blast_queries {
     """
 }
 
-// BLAST one chunk of reads. A remote search can fail (connection errors, rate limits), so each search is tried up to
-// five times with a growing wait, and a remote search is abandoned after --blast_remote_timeout. Results are kept per read in a cache directory (<store_dir>/blast_cache/<sample>,
+// BLAST one chunk of reads. A remote search can fail (connection errors, rate limits) or be slow, so the searches are tried
+// up to five times with a growing wait. Each remote search is abandoned after --blast_remote_timeout times the attempt
+// number (20m, 40m, 60m, ... by default), so a slow search gets longer on later attempts, and a search which has finished
+// is not repeated. Results are kept per read in a cache directory (<store_dir>/blast_cache/<sample>,
 // or inside the task if --blast_cache is false), so a read which leaked in several methods, or in an earlier run, is
 // only searched once. A read still unsearched after the last attempt is written as a "failed<TAB>read_id" line;
 // the task itself does not fail, so the summary is always produced and the read is reported as not searched.
@@ -339,10 +341,12 @@ process blastn_microbial_host_hits {
     // Best hit is chosen by bitscore downstream, so keep enough targets that human hits do not crowd out the rest.
     // The second search excludes human (taxid 9606) to find the best non-human hit; every line is prefixed
     // with the search it came from ("all" or "nonhuman").
-    // a remote search that never answers would otherwise hold the task forever; a timed out search counts as a failed attempt
-    limit = remote ? params.blast_remote_timeout : "24h"
-    search_all = "timeout ${limit} blastn -query todo.fasta ${dbopts} -out all.txt -evalue 1e-6 -perc_identity 85 -max_target_seqs ${params.blast_max_targets} -outfmt ${outfmt}"
-    search_nonhuman = params.blast_nonhuman ? "&& timeout ${limit} blastn -query todo.fasta ${dbopts} -out nonhuman.txt -negative_taxids 9606 -evalue 1e-6 -perc_identity 85 -max_target_seqs ${params.blast_max_targets} -outfmt ${outfmt}" : ""
+    // a remote search that never answers would otherwise hold the task forever; a timed out search counts as a
+    // failed attempt. The limit is multiplied by the attempt number (a local search is allowed 24h every time).
+    limit_secs = remote ? (params.blast_remote_timeout as nextflow.util.Duration).toSeconds() : 24 * 3600
+    blast_args = "-query todo.fasta ${dbopts} -evalue 1e-6 -perc_identity 85 -max_target_seqs ${params.blast_max_targets} -outfmt ${outfmt}"
+    search_all = "timeout \$((attempt * ${limit_secs})) blastn ${blast_args} -out all.tmp"
+    search_nonhuman = "timeout \$((attempt * ${limit_secs})) blastn ${blast_args} -negative_taxids 9606 -out nonhuman.tmp"
     result_files = params.blast_nonhuman ? "all.txt nonhuman.txt" : "all.txt"
     wait_between = remote ? "sleep \$((attempt * 60))" : "true"
     """
@@ -359,9 +363,12 @@ process blastn_microbial_host_hits {
     if [ -s todo.fasta ]; then
       ${remote ? "sleep 5" : "true"}
       ok=0
+      rm -f all.txt nonhuman.txt
       for attempt in 1 2 3 4 5; do
-        rm -f all.txt nonhuman.txt
-        if ${search_all} ${search_nonhuman}; then ok=1; break; fi
+        # a search which finished (renamed from .tmp) is not run again on a later attempt
+        [ -e all.txt ] || { ${search_all} && mv all.tmp all.txt; } || true
+        ${params.blast_nonhuman ? "[ -e nonhuman.txt ] || { ${search_nonhuman} && mv nonhuman.tmp nonhuman.txt; } || true" : "true"}
+        if [ -e all.txt ] ${params.blast_nonhuman ? "&& [ -e nonhuman.txt ]" : ""}; then ok=1; break; fi
         echo "BLAST attempt \$attempt failed" >&2
         ${wait_between}
       done
