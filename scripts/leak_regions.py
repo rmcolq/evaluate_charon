@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Where do microbial-called reads that map to the human (T2T) reference come from?
 
-Reads the `<sample>.<classifier>.microbial.sam` files published in `<outdir>/<sample>/mapped/` (or `<outdir>/intermediate/` for older runs) (only reads that
+Reads the `<sample>.<classifier>.microbial.sam` files published in `<outdir>/<sample>/mapped/` (only reads that
 the classifier called microbial are in them) and writes, per sample and classifier:
 
   * leak_reads.tsv   one row per leaked read: locus, MAPQ, divergence, aligned length, query length
@@ -116,10 +116,7 @@ def main():
                     if len(p) > 1:
                         keep.add(p[1])
         for clf in args.classifiers:
-            name = f"{sample}.{clf}.microbial.sam"
-            path = os.path.join(args.outdir, sample, "mapped", name)
-            if not os.path.exists(path):  # runs before the SAMs moved into the sample directories
-                path = os.path.join(args.outdir, "intermediate", name)
+            path = os.path.join(args.outdir, sample, "mapped", f"{sample}.{clf}.microbial.sam")
             if not os.path.exists(path) or os.path.getsize(path) == 0:
                 print(f"skip {path}: missing or empty (was --evaluate_microbial on?)")
                 continue

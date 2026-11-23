@@ -178,18 +178,11 @@ def is_human_hit(staxids):
 
 def parse_blast_line(line):
     """Return (hit_set, fields) where hit_set is 'all' or 'nonhuman' and fields are
-    qseqid, sacc, sscinames, staxids, sstart, send, evalue, pident, length, bitscore, qcovs.
-    Handles the legacy 9 column format (no bitscore or coverage) too."""
+    qseqid, sacc, sscinames, staxids, sstart, send, evalue, pident, length, bitscore, qcovs."""
     parts = line.rstrip("\n").split("\t")
-    if len(parts) == 12:
-        hit_set, parts = parts[0], parts[1:]
-    elif len(parts) == 11:
-        hit_set = "all"
-    elif len(parts) == 9:
-        hit_set, parts = "all", parts + ["nan", "nan"]
-    else:
+    if len(parts) != 12:
         raise ValueError(f"Unexpected number of BLAST columns ({len(parts)}): {line}")
-    return hit_set, parts
+    return parts[0], parts[1:]
 
 def load_blast_info(blast_results):
     sys.stderr.write("LOAD BLAST INFO FROM: " + blast_results + "\n")
@@ -338,10 +331,7 @@ def load_tsv_output(path, classifier):
 
     return df
 
-def load_output(path, classifier=None):
-    if classifier is None:
-        # legacy behaviour: infer from the file name
-        classifier = "charon" if "charon" in path else path.split(".")[-2]
+def load_output(path, classifier):
     if classifier.startswith("charon"):
         return classifier, load_charon_output(path, classifier)
     return classifier, load_tsv_output(path, classifier)
@@ -653,8 +643,8 @@ def main():
     parser.add_argument(
         "--classifier",
         dest="classifier",
-        required=False,
-        help="Name of the classifier which produced the input (charon, deacon, nohuman). Inferred from the file names if not given",
+        required=True,
+        help="Name of the classifier which produced the input (charon, charon_host_only, deacon, deacon_sensitive, nohuman)",
     )
     parser.add_argument(
         "--sample_id",
@@ -724,7 +714,7 @@ def main():
         classifier_df.to_csv(full_file, index=False)
     else:
         classifier_df = pd.read_csv(full_file, index_col=None)
-        classifier = args.classifier if args.classifier else str(full_file).split("_full.csv")[0].split("_")[-1]
+        classifier = args.classifier
         classifier_df['classification'] = classifier_df['classification'].fillna("")
         classifier_df = add_leak_tiers(classifier_df, args.min_blast_cov, args.min_blast_pident, args.bitscore_ratio)
 
