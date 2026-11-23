@@ -8,6 +8,7 @@ Run these after the pipeline, on its `--outdir`. They need Python with `pandas`,
 | `leak_regions.py` | Positions of microbial-called reads that map to the human reference (from `<sample>/mapped/*.microbial.sam`): per-read, per-locus, per-bin tables and a summary. |
 | `compare_common.py` | Host / microbial / unclassified calls on the reads every classifier processed, with 95% Wilson intervals. Reports reads Charon filtered out (below its min quality / length) separately. |
 | `plot_leak_ideogram.py` | One figure per chromosome (chr1-22, X, Y, M) and a PDF: repeat-content and gene tracks, CenSat/rDNA and segdups, then a read-density heatmap per classifier. Also writes `enrichment.tsv`. |
+| `charon_param_sweep.py` | For simulated reads with known origin: re-calls a Charon dehost report under other thresholds (a port of `call_host`) and scores each against truth from the Badread read headers. One-at-a-time sweeps, a trade-off plot, a `--confidence` × `--min_proportion_diff` grid and per-feature distributions. Lowering `--min_length`/`--min_quality`, and model parameters, need a rerun. |
 | `plot_leak_by_chromosome.py` | Leaked reads per chromosome for each classifier, raw and per 100 Mb, with a chi-square test against length-proportional spread. |
 
 ```
@@ -17,6 +18,14 @@ scripts/plot_leak_ideogram.py --reads results/leak_regions/leak_reads.tsv --samp
     --classifiers charon deacon deacon_sensitive nohuman --annotations resources/annotations --outdir results/ideogram
 scripts/plot_leak_by_chromosome.py --reads results/leak_regions/leak_reads.tsv --samples S1 S2 \
     --classifiers charon deacon deacon_sensitive nohuman -o results/by_chromosome.png
+```
+
+`charon_param_sweep.py` runs on the per-read report of one `charon dehost` run (with the thresholds at their
+defaults) and the FASTQ headers, not on the pipeline outdir:
+
+```
+zcat metagenome.ont.fq.gz | awk 'NR%4==1' > metagenome.headers
+scripts/charon_param_sweep.py --headers metagenome.headers --report charon_results.tsv --outdir param_sweep
 ```
 
 `--ref_bed` (default `resources/T2T_ref.bed`) gives the chromosome lengths. The human mitochondrion is the contig
