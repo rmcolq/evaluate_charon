@@ -79,6 +79,9 @@ rate limited, so the pipeline keeps requests small and tolerant of failures:
 - a read whose search still fails is written as `failed` and gets `blast_failed = true` in the leak tables. It is counted in
   `num_microbial_map_host_blast_failed_<classifier>` and is neither verified nor shown to be non-human. The run does not stop and
   the summary is still written.
+- the reads that BLAST is asked about (unique, before any `--blast_max_reads` cap) are published as
+  `<outdir>/<sample>/<sample>_<method>_blast_queries.fasta.gz`, so the BLAST step can be run again later, for example against a
+  local database or after remote searches failed. Read ids match the classifier's, so the hits can be joined back to the leak tables.
 
 Real contaminants such as Mycoplasma should be added to the reference in `--refs`, and their accessions listed (whitespace or
 comma separated) in a file passed with `--contaminant_accs`, so that they are not scored as human leaks.
