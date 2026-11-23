@@ -1,12 +1,21 @@
 #!/usr/bin/env nextflow
 include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; is_paired; reads_prefix; reads_glob } from '../modules/utils'
 
+// Charon holds the whole index in memory and needs about 7 GB more than that for its reads and threads (peak_rss
+// was 14.2 GB with the 7.1 GB nanopore index, and 4.3 GB with a 0.2 GB host-only index). It is given 80% of the
+// request as --max-memory, which has to stay above the peak, so ask for 1.5 times the index plus 8 GB.
+// A retry doubles it.
+def charon_memory(db, attempt) {
+    return new nextflow.util.MemoryUnit((db.size() * 1.5) as long + 8.GB.toBytes()) * attempt
+}
+
 // name labels the comparator (charon or charon_host_only) in all outputs. microbial_category is the extracted
 // category holding the reads to keep: "microbial" for a normal index, "non_host" for a host-only index.
 process run_charon {
 
     label "process_medium_plus_mem"
     label "process_long"
+    memory { charon_memory(db, task.attempt) }
     tag "${unique_id}"
     container params.charon_container 
     maxForks 4
@@ -45,6 +54,7 @@ process run_charon_chunk {
 
     label "process_medium_plus_mem"
     label "process_long"
+    memory { charon_memory(db, task.attempt) }
     container params.charon_container
     maxForks 4
 

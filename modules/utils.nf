@@ -256,13 +256,16 @@ process extract_microbial_host_hits {
     tag "${unique_id}"
     conda "bioconda::samtools=1.21"
     container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
+    // The reads to search, before any --blast_max_reads cap, kept so the BLAST step can be run again later
+    publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*_blast_queries.fasta.gz"
 
     input:
     tuple val(unique_id), val(method), path(sam_file)
     path ref_bed
 
     output:
-    tuple val(unique_id), val(method), path("query.fasta")
+    tuple val(unique_id), val(method), path("query.fasta"), emit: query
+    path "${unique_id}_${method}_blast_queries.fasta.gz", emit: published
 
     script:
     """
@@ -271,6 +274,7 @@ process extract_microbial_host_hits {
     samtools view -L ${ref_bed} ${sam_file.baseName}.sorted.bam -b -o out.bam
     # -n keeps the read name as it is (no /1 /2), so BLAST hits match the classifier's read ids
     samtools fasta -n out.bam > "query.fasta"
+    gzip -c query.fasta > "${unique_id}_${method}_blast_queries.fasta.gz"
     """
 }
 
@@ -439,7 +443,7 @@ workflow verify_microbial_host_hits {
         else
             blast_db = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true) // any file will do to not block
 
-        split_blast_queries(extract_microbial_host_hits.out)
+        split_blast_queries(extract_microbial_host_hits.out.query)
         // one item per chunk; the sample's groupKey carries the number of chunks, so the results of a sample are
         // merged as soon as its own chunks are done
         split_blast_queries.out
