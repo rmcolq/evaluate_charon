@@ -8,9 +8,12 @@ is exact. Reads with status F were filtered before hashing, so lowering min_leng
 the values used in the run cannot be simulated. Parameters that change the fitted model
 (lo_hi_threshold, num_reads_to_fit, dist) need a rerun.
 
-Truth comes from Badread read headers: `<id> <acc>,<strand>,<start>-<end> [chimera <acc>,...] length=...`.
+Truth comes from simulated read headers (`--headers`: Badread, or an accession in the read id) or from a
+read_id<TAB>label table (`--truth_tsv`, e.g. read2truth.ont.tsv for the Hall et al. real-read mixture).
+Pass the run's log (`--log`) so the thresholds it used are the starting point.
 """
 import argparse
+import itertools
 import os
 
 import matplotlib
@@ -37,87 +40,138 @@ def style():
                          "lines.linewidth": 2, "legend.frameon": False, "figure.dpi": 150})
 
 
-def load_truth(path, human_prefixes=HUMAN_PREFIXES, mtb=MTB):
+def classify_accessions(segs, human_prefixes, mtb):
+    """truth and source for the source accessions of one read (more than one for a Badread chimera)"""
+    human = [a.split("|")[-1].startswith(human_prefixes) for a in segs]
+    if all(human):
+        return "human", "human"
+    if any(human):
+        return "chimera", "chimera"
+    accs = {a.split("|")[-1] for a in segs}
+    if accs <= mtb:
+        return "microbial", "MTB"
+    if not any("|" in a for a in segs):
+        return "microbial", "NTM"
+    return "microbial", "other microbial"
+
+
+def load_truth_headers(path, human_prefixes=HUMAN_PREFIXES, mtb=MTB):
+    """Truth from simulated read headers, one per line.
+
+    Badread:            @<id> <acc>,<strand>,<start>-<end> [chimera <acc>,...] length=...
+    accession in the id: @<acc>-<n>/1 (simulated Illumina pairs)
+    Lines that are not headers (a FASTQ quality line starting with @) find no report row and drop out of the join.
+    """
     rows = []
     with open(path) as f:
         for line in f:
             parts = line[1:].split()
-            segs = [p.split(",")[0].split("|")[-1] for p in parts[1:] if "strand" in p]
-            human = [s.startswith(human_prefixes) for s in segs]
-            if all(human):
-                truth = "human"
-            elif not any(human):
-                truth = "microbial"
-            else:
-                truth = "chimera"
-            if truth == "microbial":
-                source = "MTB" if segs[0] in mtb and len(set(segs)) == 1 else ("NTM" if "|" not in parts[1] and len(segs) == 1 else "other microbial")
-            else:
-                source = truth
-            rows.append((parts[0], truth, source, len(segs) > 1))
-    return pd.DataFrame(rows, columns=["id", "truth", "source", "chimeric"])
+            if not parts:
+                continue
+            segs = [p.split(",")[0] for p in parts[1:] if "strand" in p]
+            if not segs:
+                segs = [parts[0].rsplit("/", 1)[0].rsplit("-", 1)[0]]
+            truth, source = classify_accessions(segs, human_prefixes, mtb)
+            rows.append((parts[0], truth, source, segs[0].split("|")[-1]))
+    return pd.DataFrame(rows, columns=["id", "truth", "source", "accession"])
+
+
+def load_truth_tsv(path, human_labels=("human",)):
+    """Truth from a two-column read_id<TAB>label table (e.g. read2truth.ont.tsv); labels other than human are microbial"""
+    t = pd.read_csv(path, sep="\t", header=None, usecols=[0, 1], names=["id", "source"], dtype=str)
+    t["truth"] = np.where(t.source.isin(human_labels), "human", "microbial")
+    return t
+
+
+DETAIL_RE = r"(?P<cat>[^: ]+):(?P<count>[^: ]+):(?P<prop>[^: ]+):(?P<uprop>[^: ]+):(?P<prob>[^: ]+)"
 
 
 def load_report(path, host="human"):
-    r = pd.read_csv(path, sep="\t", header=None, usecols=range(9), quoting=3,
+    r = pd.read_csv(path, sep="\t", header=None, usecols=range(9), quoting=3, dtype={"details": str, "call": str},
                     names=["status", "id", "call", "length", "num_hashes", "quality", "confidence", "compression", "details"])
     r["call"] = r["call"].fillna("")
     r.loc[r.status == "U", "call"] = "unclassified"
     r.loc[r.status == "F", "call"] = "filtered"
-    det = r.details.where(r.status != "F", "")
-    for prefix in ("host", "other"):
+    # details: "cat:count:prop:uprop:prob cat:count:prop:uprop:prob" (two categories for a host + microbial index)
+    det = r.details.where(r.status != "F", "").fillna("").str.extractall(DETAIL_RE)
+    det = det.apply(lambda c: c if c.name == "cat" else pd.to_numeric(c, errors="coerce"))
+    is_host = det.cat == host
+    for prefix, sel in (("host", is_host), ("other", ~is_host)):
+        part = det[sel].droplevel(1)
         for col in ("count", "prop", "uprop", "prob"):
-            r[f"{prefix}_{col}"] = np.nan
-    # vectorised parse of "cat:count:prop:uprop:prob cat:count:prop:uprop:prob"
-    parts = det.str.strip().str.split(" ", expand=True)
-    for c in parts.columns:
-        f = parts[c].str.split(":", expand=True)
-        if f.shape[1] < 5:
-            continue
-        is_host = f[0] == host
-        valid = f[0].notna() & (f[0] != "")
-        for j, col in enumerate(("count", "prop", "uprop", "prob"), start=1):
-            v = pd.to_numeric(f[j], errors="coerce")
-            r.loc[valid & is_host, f"host_{col}"] = v[valid & is_host]
-            r.loc[valid & ~is_host, f"other_{col}"] = v[valid & ~is_host]
+            r[f"{prefix}_{col}"] = part[col].reindex(r.index)
     r["confidence"] = pd.to_numeric(r.confidence, errors="coerce")
     r["compression"] = pd.to_numeric(r.compression, errors="coerce")
     return r
 
 
+LOG_KEYS = {"min_length": "min_length", "min_quality": "min_quality", "min_compression": "min_compression",
+            "confidence_threshold": "confidence_threshold",
+            "confidence_probability_threshold": "confidence_probability_threshold",
+            "host_unique_prop_lo_threshold": "host_unique_prop_lo_threshold",
+            "min_proportion_difference": "min_proportion_difference", "min_prob_difference": "min_prob_difference"}
+
+
+def thresholds_from_log(path):
+    """The thresholds a dehost run used, from the 'Dehost Arguments' block of its log"""
+    found = {}
+    with open(path, encoding="utf-8-sig") as f:
+        for line in f:
+            key, _, value = line.strip().partition(":")
+            if key in LOG_KEYS and value.strip():
+                found[LOG_KEYS[key]] = float(value)
+    return found
+
+
 def recall(df, **overrides):
     """Vectorised port of ReadEntry::call_host. Returns array of human / microbial / unclassified / filtered."""
     p = dict(DEFAULTS, **overrides)
-    filtered = (df.status == "F").to_numpy()
+    a = df.attrs["arrays"]
+    filtered = a["F"].copy()
     if p["min_length"] > DEFAULTS["min_length"] or p["min_quality"] > DEFAULTS["min_quality"]:
         # raising the pre-filter thresholds: these reads would now be F
-        filtered = filtered | (df.length < p["min_length"]).to_numpy() | (df.quality < p["min_quality"]).to_numpy()
-    hu, ou, hp, op = (df[c].to_numpy() for c in ("host_uprop", "other_uprop", "host_prob", "other_prob"))
-    conf = df.confidence.to_numpy()
-    ok = (conf >= p["confidence_threshold"]) & (df.quality >= p["min_quality"]).to_numpy() \
-        & (df.length >= p["min_length"]).to_numpy() & (df.compression >= p["min_compression"]).to_numpy()
+        filtered |= (a["length"] < p["min_length"]) | (a["quality"] < p["min_quality"])
+    hu, ou, hp, op, conf = a["hu"], a["ou"], a["hp"], a["op"], a["conf"]
+    ok = (conf >= p["confidence_threshold"]) & (a["quality"] >= p["min_quality"]) \
+        & (a["length"] >= p["min_length"]) & (a["compression"] >= p["min_compression"])
     host = ok & (hu > ou) & (hu - ou > p["min_proportion_difference"]) & (hp > op) \
         & (hp - op > p["min_prob_difference"]) & (np.maximum(hp * conf, conf) >= p["confidence_probability_threshold"])
     micro = ok & ~host & (hu < p["host_unique_prop_lo_threshold"]) & (hu < ou) \
         & (ou - hu > p["min_proportion_difference"]) & (hp < op) & (op - hp > p["min_prob_difference"]) \
         & (np.maximum(op * conf, conf) >= p["confidence_probability_threshold"])
-    out = np.full(len(df), "unclassified", dtype=object)
-    out[host] = "human"
-    out[micro] = "microbial"
-    out[filtered] = "filtered"
+    out = np.full(len(df), 2, dtype=np.int8)  # codes index CALLS
+    out[host] = 0
+    out[micro] = 1
+    out[filtered] = 3
     return out
 
 
-def score(df, calls):
+CALLS = np.array(["human", "microbial", "unclassified", "filtered"], dtype=object)
+
+
+def prepare(df):
+    with np.errstate(invalid="ignore"):
+        df.attrs["arrays"] = dict(
+            F=(df.status == "F").to_numpy(), length=df.length.to_numpy(float), quality=df.quality.to_numpy(float),
+            compression=df.compression.to_numpy(float), conf=df.confidence.to_numpy(float),
+            hu=df.host_uprop.to_numpy(float), ou=df.other_uprop.to_numpy(float),
+            hp=df.host_prob.to_numpy(float), op=df.other_prob.to_numpy(float),
+            truth={t: (df.truth == t).to_numpy() for t in ("human", "microbial", "chimera")})
+    return df
+
+
+def score(df, codes):
+    a = df.attrs["arrays"]
     res = {}
-    for truth in ("human", "microbial", "chimera"):
-        m = (df.truth == truth).to_numpy()
-        n, bases = m.sum(), df.length[m].sum()
-        for c in ("human", "microbial", "unclassified", "filtered"):
-            sel = m & (calls == c)
-            res[f"{truth}_{c}"] = int(sel.sum())
-            res[f"{truth}_{c}_pct"] = 100 * sel.sum() / n if n else np.nan
-            res[f"{truth}_{c}_bases_pct"] = 100 * df.length[sel].sum() / bases if bases else np.nan
+    for truth, m in a["truth"].items():
+        n = m.sum()
+        reads = np.bincount(codes[m], minlength=4)
+        bases = np.bincount(codes[m], weights=a["length"][m], minlength=4)
+        total_bases = bases.sum()
+        for k, c in enumerate(CALLS):
+            res[f"{truth}_{c}"] = int(reads[k])
+            res[f"{truth}_{c}_pct"] = 100 * reads[k] / n if n else np.nan
+            res[f"{truth}_{c}_bases_pct"] = 100 * bases[k] / total_bases if n else np.nan
     res["human_kept"] = res["human_microbial"] + res["human_unclassified"] + res["human_filtered"]
     return res
 
@@ -127,8 +181,8 @@ SWEEPS = {
     "min_proportion_difference": np.round(np.r_[0:0.3001:0.005], 4),
     "host_unique_prop_lo_threshold": np.round(np.r_[0:0.5001:0.01, 0.6, 0.8, 1.0], 4),
     "min_prob_difference": np.r_[0, 1e-6, 1e-5, 1e-4, 1e-3, 0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 0.95, 0.99, 0.999],
-    "min_length": np.r_[140, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000],
-    "min_quality": np.round(np.r_[15:25.01:0.5], 2),
+    "min_length": np.r_[80, 100, 120, 140, 160, 200, 250, 300, 500, 750, 1000, 1500, 2000, 3000, 5000],
+    "min_quality": np.round(np.r_[0:25.01:0.5], 2),
     "min_compression": np.round(np.r_[0:0.4001:0.01], 3),
 }
 LABELS = {
@@ -284,23 +338,39 @@ def plot_sources(df, out):
     return tab
 
 
+COMBO = dict(confidence_threshold=[5, 7, 8, 10],
+             min_proportion_difference=[0.04, 0.05, 0.06, 0.07, 0.08, 0.1],
+             host_unique_prop_lo_threshold=[0.03, 0.04, 0.05],
+             min_prob_difference=[0, 0.2],
+             min_compression=[0, 0.25, 0.28, 0.3])
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--headers", required=True, help="read headers from the simulated FASTQ (one per line)")
+    truth = ap.add_mutually_exclusive_group(required=True)
+    truth.add_argument("--headers", help="read headers from the simulated FASTQ (one per line); truth is the source accession")
+    truth.add_argument("--truth_tsv", help="read_id<TAB>label table, e.g. read2truth.ont.tsv")
     ap.add_argument("--report", required=True, help="charon dehost report (.tsv/.out)")
+    ap.add_argument("--log", help="charon dehost log; the thresholds the run used are read from it (default: Charon defaults)")
     ap.add_argument("--outdir", required=True)
     ap.add_argument("--human_prefixes", nargs="+", default=list(HUMAN_PREFIXES),
-                    help="accession prefixes of human source contigs (default: KOREF, as in Hall et al. Zenodo 8339789)")
-    ap.add_argument("--mtb", nargs="+", default=sorted(MTB), help="accessions reported separately as MTB")
+                    help="with --headers: accession prefixes of human source contigs (default: KOREF, as in Hall et al. Zenodo 8339789)")
+    ap.add_argument("--mtb", nargs="+", default=sorted(MTB), help="with --headers: accessions reported separately as MTB")
+    ap.add_argument("--human_labels", nargs="+", default=["human"], help="with --truth_tsv: labels that are human")
     a = ap.parse_args()
     os.makedirs(a.outdir, exist_ok=True)
     style()
+    if a.log:
+        DEFAULTS.update(thresholds_from_log(a.log))
+    print("run thresholds:", DEFAULTS)
 
-    df = load_truth(a.headers, tuple(a.human_prefixes), set(a.mtb)).merge(load_report(a.report), on="id", how="inner")
-    assert len(df), "no read ids in common between headers and report"
+    t = load_truth_headers(a.headers, tuple(a.human_prefixes), set(a.mtb)) if a.headers \
+        else load_truth_tsv(a.truth_tsv, a.human_labels)
+    df = prepare(t.merge(load_report(a.report), on="id", how="inner"))
+    assert len(df), "no read ids in common between truth and report"
 
     # check the port reproduces the run
-    recalled = recall(df)
+    recalled = CALLS[recall(df)]
     mism = (recalled != df.call.to_numpy())
     print(f"{len(df):,} reads; port reproduces {100 * (1 - mism.mean()):.4f}% of calls ({mism.sum()} differ)")
     if mism.any():
@@ -312,10 +382,18 @@ def main():
 
     rows = []
     for prm, vals in SWEEPS.items():
+        if prm in ("min_length", "min_quality"):  # lowering these needs a rerun (status F reads were never hashed)
+            vals = vals[vals >= DEFAULTS[prm]]
         for v in vals:
             rows.append(dict(parameter=prm, value=v, **score(df, recall(df, **{prm: v}))))
     sweep = pd.DataFrame(rows)
     sweep.to_csv(os.path.join(a.outdir, "one_at_a_time_sweep.tsv"), sep="\t", index=False)
+
+    rows = []
+    for combo in itertools.product(*COMBO.values()):
+        settings = dict(zip(COMBO, combo))
+        rows.append(dict(**settings, **score(df, recall(df, **settings))))
+    pd.DataFrame(rows).to_csv(os.path.join(a.outdir, "combination_grid.tsv"), sep="\t", index=False)
 
     plot_sweeps(sweep, os.path.join(a.outdir, "sweep_one_at_a_time.png"))
     plot_tradeoff(sweep, os.path.join(a.outdir, "tradeoff.png"))
@@ -323,6 +401,13 @@ def main():
     plot_grid(df, os.path.join(a.outdir, "grid_confidence_x_proportion_diff.png")) \
         .to_csv(os.path.join(a.outdir, "grid_confidence_x_proportion_diff.tsv"), sep="\t", index=False)
 
+    # human reads by source accession, so leaks concentrated in a few contigs (or a contig set) show up
+    if "accession" in df:
+        h = df[df.truth == "human"]
+        group = h.accession.str.extract(r"^([A-Z_]+)", expand=False)
+        pd.crosstab(group, h.call).to_csv(os.path.join(a.outdir, "human_calls_by_accession_prefix.tsv"), sep="\t")
+        pd.crosstab(h.accession, h.call).sort_values("microbial", ascending=False) \
+            .to_csv(os.path.join(a.outdir, "human_calls_by_accession.tsv"), sep="\t")
     err = df[((df.truth == "human") & (df.call != "human")) | ((df.truth == "microbial") & (df.call != "microbial"))
              | (df.truth == "chimera")]
     err.drop(columns=["details"]).to_csv(os.path.join(a.outdir, "reads_not_called_as_truth.tsv"), sep="\t", index=False)
