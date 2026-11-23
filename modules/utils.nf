@@ -94,8 +94,7 @@ process stage_fastq {
 // build it natively and copy it to the path logged at the start of the run.
 // The size of the reference is in the name, so a changed reference is indexed again rather than using a stale index.
 process minimap2_index {
-    label "process_high_memory"
-    label "process_high"
+    label "process_medium"
     conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
     storeDir "${params.store_dir}/minimap2/"
@@ -220,7 +219,7 @@ process minimap2_host {
     conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
 
-    publishDir "${params.outdir}/intermediate/", mode: 'copy', pattern: "*.sam"
+    publishDir "${params.outdir}/${unique_id}/mapped/", mode: 'copy', pattern: "*.sam"
 
     input:
         tuple val(unique_id), val(method), path(fastq)
@@ -257,13 +256,16 @@ process extract_microbial_host_hits {
     tag "${unique_id}"
     conda "bioconda::samtools=1.21"
     container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
+    // The reads to search, before any --blast_max_reads cap, kept so the BLAST step can be run again later
+    publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*_blast_queries.fasta.gz"
 
     input:
     tuple val(unique_id), val(method), path(sam_file)
     path ref_bed
 
     output:
-    tuple val(unique_id), val(method), path("query.fasta")
+    tuple val(unique_id), val(method), path("query.fasta"), emit: query
+    path "${unique_id}_${method}_blast_queries.fasta.gz", emit: published
 
     script:
     """
@@ -272,6 +274,75 @@ process extract_microbial_host_hits {
     samtools view -L ${ref_bed} ${sam_file.baseName}.sorted.bam -b -o out.bam
     # -n keeps the read name as it is (no /1 /2), so BLAST hits match the classifier's read ids
     samtools fasta -n out.bam > "query.fasta"
+    gzip -c query.fasta > "${unique_id}_${method}_blast_queries.fasta.gz"
+    """
+}
+
+// Map a set of reads which were not called by a method (e.g. the reads charon leaves unclassified) to the reference
+// in full, not a sample, and publish the alignments. Reads which do not map are not in the SAM.
+process minimap2_unclassified {
+
+    label "process_medium"
+    label "error_ignore"
+    tag "${unique_id}"
+    conda "bioconda::minimap2=2.28"
+    container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
+    publishDir "${params.outdir}/${unique_id}/mapped/", mode: 'copy', pattern: "*.sam"
+
+    input:
+        tuple val(unique_id), val(method), path(fastq)
+        path refs
+    output:
+        tuple val(unique_id), val(method), path("${unique_id}.${method}.unclassified.sam")
+    script:
+        """
+        minimap2 -ax ${minimap2_preset()} ${refs} ${fastq} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > "${unique_id}.${method}.unclassified.sam"
+        """
+}
+
+// One row per mapped read, with the same alignment columns as the full tables
+process alignment_table {
+
+    label "process_low"
+    label "error_ignore"
+    tag "${unique_id}"
+    container 'community.wave.seqera.io/library/simplesam_numpy_pandas_pip_taxoniq:3af1649bdaf86fca'
+    publishDir "${params.outdir}/${unique_id}/", mode: 'copy'
+
+    input:
+        tuple val(unique_id), val(method), path(sam)
+    output:
+        path "${unique_id}_${method}_unclassified_alignments.csv.gz"
+    script:
+        """
+        alignment_table.py --sam ${sam} --out "${unique_id}_${method}_unclassified_alignments.csv.gz"
+        """
+}
+
+// Keep a set of reads (one file, or R1 and R2 of a pair) in <outdir>/<sample>/reads, named for the sample, method and
+// category. The reads are copied, because the originals are still needed by the next steps.
+process publish_reads {
+
+    label "process_single"
+    label "error_ignore"
+    tag "${unique_id}"
+    publishDir "${params.outdir}/${unique_id}/reads/", mode: 'copy'
+
+    input:
+    tuple val(unique_id), val(method), val(category), path(reads, stageAs: "in/*")
+
+    output:
+    path "${unique_id}_${method}_${category}*.f*q.gz"
+
+    script:
+    def files = reads instanceof List ? reads : [reads]
+    def copies = files.withIndex().collect{ f, i ->
+        def suffix = files.size() > 1 ? "_${i + 1}" : ""
+        def out = "${unique_id}_${method}_${category}${suffix}.fastq.gz"
+        "cp -L \"${f}\" tmp.gz && (gzip -t tmp.gz 2>/dev/null && mv tmp.gz ${out} || gzip -c \"${f}\" > ${out})"
+    }
+    """
+    ${copies.join("\n    ")}
     """
 }
 
@@ -307,8 +378,10 @@ process split_blast_queries {
     """
 }
 
-// BLAST one chunk of reads. A remote search can fail (connection errors, rate limits), so each search is tried up to
-// five times with a growing wait, and a remote search is abandoned after --blast_remote_timeout. Results are kept per read in a cache directory (<store_dir>/blast_cache/<sample>,
+// BLAST one chunk of reads. A remote search can fail (connection errors, rate limits) or be slow, so the searches are tried
+// up to five times with a growing wait. Each remote search is abandoned after --blast_remote_timeout times the attempt
+// number (20m, 40m, 60m, ... by default), so a slow search gets longer on later attempts, and a search which has finished
+// is not repeated. Results are kept per read in a cache directory (<store_dir>/blast_cache/<sample>,
 // or inside the task if --blast_cache is false), so a read which leaked in several methods, or in an earlier run, is
 // only searched once. A read still unsearched after the last attempt is written as a "failed<TAB>read_id" line;
 // the task itself does not fail, so the summary is always produced and the read is reported as not searched.
@@ -326,9 +399,10 @@ process blastn_microbial_host_hits {
     path(blast_db)
 
     output:
-    tuple val(unique_id), val(method), path("results_blastn.txt")
+    tuple val(unique_id), val(method), path("results_${fasta_file.baseName}.txt")
 
     script:
+    out_name = "results_${fasta_file.baseName}.txt"
     remote = !params.blast_db
     dbopts = remote ? "-db nt -remote" : "-db ${blast_db}/nt -num_threads 4"
     cache = params.blast_cache ? "${file(params.store_dir).toAbsolutePath()}/blast_cache/${unique_id}" : "\$PWD/blast_cache"
@@ -336,10 +410,12 @@ process blastn_microbial_host_hits {
     // Best hit is chosen by bitscore downstream, so keep enough targets that human hits do not crowd out the rest.
     // The second search excludes human (taxid 9606) to find the best non-human hit; every line is prefixed
     // with the search it came from ("all" or "nonhuman").
-    // a remote search that never answers would otherwise hold the task forever; a timed out search counts as a failed attempt
-    limit = remote ? params.blast_remote_timeout : "24h"
-    search_all = "timeout ${limit} blastn -query todo.fasta ${dbopts} -out all.txt -evalue 1e-6 -perc_identity 85 -max_target_seqs ${params.blast_max_targets} -outfmt ${outfmt}"
-    search_nonhuman = params.blast_nonhuman ? "&& timeout ${limit} blastn -query todo.fasta ${dbopts} -out nonhuman.txt -negative_taxids 9606 -evalue 1e-6 -perc_identity 85 -max_target_seqs ${params.blast_max_targets} -outfmt ${outfmt}" : ""
+    // a remote search that never answers would otherwise hold the task forever; a timed out search counts as a
+    // failed attempt. The limit is multiplied by the attempt number (a local search is allowed 24h every time).
+    limit_secs = remote ? (params.blast_remote_timeout as nextflow.util.Duration).toSeconds() : 24 * 3600
+    blast_args = "-query todo.fasta ${dbopts} -evalue 1e-6 -perc_identity 85 -max_target_seqs ${params.blast_max_targets} -outfmt ${outfmt}"
+    search_all = "timeout \$((attempt * ${limit_secs})) blastn ${blast_args} -out all.tmp"
+    search_nonhuman = "timeout \$((attempt * ${limit_secs})) blastn ${blast_args} -negative_taxids 9606 -out nonhuman.tmp"
     result_files = params.blast_nonhuman ? "all.txt nonhuman.txt" : "all.txt"
     wait_between = remote ? "sleep \$((attempt * 60))" : "true"
     """
@@ -356,9 +432,12 @@ process blastn_microbial_host_hits {
     if [ -s todo.fasta ]; then
       ${remote ? "sleep 5" : "true"}
       ok=0
+      rm -f all.txt nonhuman.txt
       for attempt in 1 2 3 4 5; do
-        rm -f all.txt nonhuman.txt
-        if ${search_all} ${search_nonhuman}; then ok=1; break; fi
+        # a search which finished (renamed from .tmp) is not run again on a later attempt
+        [ -e all.txt ] || { ${search_all} && mv all.tmp all.txt; } || true
+        ${params.blast_nonhuman ? "[ -e nonhuman.txt ] || { ${search_nonhuman} && mv nonhuman.tmp nonhuman.txt; } || true" : "true"}
+        if [ -e all.txt ] ${params.blast_nonhuman ? "&& [ -e nonhuman.txt ]" : ""}; then ok=1; break; fi
         echo "BLAST attempt \$attempt failed" >&2
         ${wait_between}
       done
@@ -372,33 +451,45 @@ process blastn_microbial_host_hits {
       fi
     fi
 
-    : > results_blastn.txt
+    : > ${out_name}
     ids ${fasta_file} | while read -r id; do
       f="\$CACHE/\$(safe "\$id")"
       if [ -e "\$f.done" ]; then
-        if [ -f "\$f.txt" ]; then cat "\$f.txt" >> results_blastn.txt; fi
+        if [ -f "\$f.txt" ]; then cat "\$f.txt" >> ${out_name}; fi
       else
-        printf 'failed\\t%s\\n' "\$id" >> results_blastn.txt
+        printf 'failed\\t%s\\n' "\$id" >> ${out_name}
       fi
     done
     """
 }
 
+// Merge the results of the chunks of one sample and method. The query chunks come with the results, so a chunk
+// which has no result file (its task failed or was killed) is written as "failed" for each of its reads, instead
+// of the sample losing all its BLAST results.
 process merge_blast_results {
 
     label "process_single"
     tag "${unique_id}"
-    publishDir "${params.outdir}/intermediate/", mode: 'copy'
+    publishDir "${params.outdir}/${unique_id}/blast/", mode: 'copy'
 
     input:
-    tuple val(unique_id), val(method), path(results, stageAs: "chunk_*.txt")
+    tuple val(unique_id), val(method), path(queries, stageAs: "queries/*"), path(results, stageAs: "chunk_results/*")
 
     output:
     tuple val(unique_id), path("${unique_id}.${method}.results_blastn.txt")
 
     script:
     """
-    cat chunk_*.txt > "${unique_id}.${method}.results_blastn.txt"
+    : > "${unique_id}.${method}.results_blastn.txt"
+    for q in queries/*.fasta; do
+      f="chunk_results/results_\$(basename "\$q" .fasta).txt"
+      if [ -f "\$f" ]; then
+        cat "\$f"
+      else
+        echo "No BLAST result for \$q, marking its reads as failed" >&2
+        grep '^>' "\$q" | sed 's/^>//; s/[ \t].*//' | awk '{print "failed\t" \$0}' || true
+      fi
+    done >> "${unique_id}.${method}.results_blastn.txt"
     """
 }
 
@@ -407,7 +498,7 @@ process cat_all_microbial_sam_files {
     label "process_low"
     tag "${unique_id}"
     container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
-    publishDir "${params.outdir}/intermediate/", mode: 'copy', pattern: "*.sam"
+    publishDir "${params.outdir}/${unique_id}/mapped/", mode: 'copy', pattern: "*.sam"
 
     input:
     tuple val(unique_id), val(method), path(sam_files)
@@ -440,7 +531,7 @@ workflow verify_microbial_host_hits {
         else
             blast_db = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true) // any file will do to not block
 
-        split_blast_queries(extract_microbial_host_hits.out)
+        split_blast_queries(extract_microbial_host_hits.out.query)
         // one item per chunk; the sample's groupKey carries the number of chunks, so the results of a sample are
         // merged as soon as its own chunks are done
         split_blast_queries.out
@@ -450,9 +541,14 @@ workflow verify_microbial_host_hits {
             }
             .set{ blast_chunks_ch }
         blastn_microbial_host_hits(blast_chunks_ch, blast_db)
+        // remainder: a sample with a chunk which failed (or all of them) is still merged, once the others are done
         blastn_microbial_host_hits.out
-            .groupTuple()
-            .map{ unique_id, methods, results -> [unique_id, methods[0], results] }
+            .groupTuple(remainder: true)
+            .map{ unique_id, methods, results -> [unique_id.toString(), methods[0], results] }
+            .set{ blast_results_ch }
+        split_blast_queries.out
+            .join(blast_results_ch, by: [0, 1], remainder: true)
+            .map{ unique_id, method, chunks, results -> [unique_id, method, chunks, results ?: []] }
             | merge_blast_results
         merge_blast_results.out
             .map{ unique_id, result -> [unique_id.toString(), result] }
