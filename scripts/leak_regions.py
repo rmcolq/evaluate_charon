@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Where do microbial-called reads that map to the human (T2T) reference come from?
 
-Reads the `<sample>.<classifier>.microbial.sam` files published in `<outdir>/intermediate/` (only reads that
+Reads the `<sample>.<classifier>.microbial.sam` files published in `<outdir>/<sample>/mapped/` (only reads that
 the classifier called microbial are in them) and writes, per sample and classifier:
 
   * leak_reads.tsv   one row per leaked read: locus, MAPQ, divergence, aligned length, query length
@@ -83,7 +83,7 @@ def cluster(rows, dist):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--outdir", default="out", help="pipeline output directory (contains intermediate/)")
+    ap.add_argument("--outdir", default="out", help="pipeline output directory (contains <sample>/mapped/)")
     ap.add_argument("--samples", nargs="+", required=True)
     ap.add_argument("--classifiers", nargs="+", required=True)
     ap.add_argument("--results", default="results/leak_regions", help="where to write tables")
@@ -116,7 +116,7 @@ def main():
                     if len(p) > 1:
                         keep.add(p[1])
         for clf in args.classifiers:
-            path = os.path.join(args.outdir, "intermediate", f"{sample}.{clf}.microbial.sam")
+            path = os.path.join(args.outdir, sample, "mapped", f"{sample}.{clf}.microbial.sam")
             if not os.path.exists(path) or os.path.getsize(path) == 0:
                 print(f"skip {path}: missing or empty (was --evaluate_microbial on?)")
                 continue

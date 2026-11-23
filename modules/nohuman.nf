@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; is_paired; reads_prefix; reads_glob; first_file } from '../modules/utils'
+include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; publish_reads; is_paired; reads_prefix; reads_glob; first_file } from '../modules/utils'
 
 process download_nohuman_index {
     label "process_single"
@@ -90,6 +90,9 @@ workflow evaluate_nohuman {
     download_nohuman_index()
 
     run_nohuman(fastq_ch, download_nohuman_index.out)
+    if ( params.publish_reads ) {
+        publish_reads(run_nohuman.out.microbial_fastq.map{ id, method, reads -> [id, method, "microbial", reads] })
+    }
     collect_classifications(run_nohuman.out.combined)
     minimap2_microbial(run_nohuman.out.microbial_fastq, refs)
     minimap2_host(run_nohuman.out.human_fastq, refs)
