@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; is_paired; reads_prefix; reads_glob; first_file } from '../modules/utils'
+include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; publish_reads; is_paired; reads_prefix; reads_glob; first_file } from '../modules/utils'
 
 process download_deacon_index {
     label "process_single"
@@ -97,6 +97,9 @@ workflow evaluate_deacon {
 
 
     run_deacon(fastq_ch, deacon_index, name, extra_args)
+    if ( params.publish_reads ) {
+        publish_reads(run_deacon.out.microbial_fastq.map{ id, method, reads -> [id, method, "microbial", reads] })
+    }
     collect_classifications(run_deacon.out.combined)
     minimap2_microbial(run_deacon.out.microbial_fastq, refs)
     minimap2_host(run_deacon.out.human_fastq, refs)

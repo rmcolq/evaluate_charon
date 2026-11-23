@@ -278,6 +278,74 @@ process extract_microbial_host_hits {
     """
 }
 
+// Map a set of reads which were not called by a method (e.g. the reads charon leaves unclassified) to the reference
+// in full, not a sample, and publish the alignments. Reads which do not map are not in the SAM.
+process minimap2_unclassified {
+
+    label "process_medium"
+    label "error_ignore"
+    tag "${unique_id}"
+    conda "bioconda::minimap2=2.28"
+    container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
+    publishDir "${params.outdir}/intermediate/", mode: 'copy', pattern: "*.sam"
+
+    input:
+        tuple val(unique_id), val(method), path(fastq)
+        path refs
+    output:
+        tuple val(unique_id), val(method), path("${unique_id}.${method}.unclassified.sam")
+    script:
+        """
+        minimap2 -ax ${minimap2_preset()} ${refs} ${fastq} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > "${unique_id}.${method}.unclassified.sam"
+        """
+}
+
+// One row per mapped read, with the same alignment columns as the full tables
+process alignment_table {
+
+    label "process_low"
+    label "error_ignore"
+    tag "${unique_id}"
+    container 'community.wave.seqera.io/library/simplesam_numpy_pandas_pip_taxoniq:3af1649bdaf86fca'
+    publishDir "${params.outdir}/${unique_id}/", mode: 'copy'
+
+    input:
+        tuple val(unique_id), val(method), path(sam)
+    output:
+        path "${unique_id}_${method}_unclassified_alignments.csv.gz"
+    script:
+        """
+        alignment_table.py --sam ${sam} --out "${unique_id}_${method}_unclassified_alignments.csv.gz"
+        """
+}
+
+// Keep a set of reads (one file, or R1 and R2 of a pair) in <outdir>/<sample>/reads, named for the sample, method and
+// category. The reads are copied, because the originals are still needed by the next steps.
+process publish_reads {
+
+    label "process_single"
+    label "error_ignore"
+    tag "${unique_id}"
+    publishDir "${params.outdir}/${unique_id}/reads/", mode: 'copy'
+
+    input:
+    tuple val(unique_id), val(method), val(category), path(reads, stageAs: "in/*")
+
+    output:
+    path "${unique_id}_${method}_${category}*.f*q.gz"
+
+    script:
+    def files = reads instanceof List ? reads : [reads]
+    def copies = files.withIndex().collect{ f, i ->
+        def suffix = files.size() > 1 ? "_${i + 1}" : ""
+        def out = "${unique_id}_${method}_${category}${suffix}.fastq.gz"
+        "cp -L \"${f}\" tmp.gz && (gzip -t tmp.gz 2>/dev/null && mv tmp.gz ${out} || gzip -c \"${f}\" > ${out})"
+    }
+    """
+    ${copies.join("\n    ")}
+    """
+}
+
 // Reads are searched in small chunks, so a remote search does not send NCBI one huge request. The reads are
 // unique, optionally capped at --blast_max_reads (a random sample, the same every run), and written as chunks of
 // --blast_chunk_reads reads. There is always at least one (possibly empty) chunk, so every sample gets a result.
@@ -331,9 +399,10 @@ process blastn_microbial_host_hits {
     path(blast_db)
 
     output:
-    tuple val(unique_id), val(method), path("results_blastn.txt")
+    tuple val(unique_id), val(method), path("results_${fasta_file.baseName}.txt")
 
     script:
+    out_name = "results_${fasta_file.baseName}.txt"
     remote = !params.blast_db
     dbopts = remote ? "-db nt -remote" : "-db ${blast_db}/nt -num_threads 4"
     cache = params.blast_cache ? "${file(params.store_dir).toAbsolutePath()}/blast_cache/${unique_id}" : "\$PWD/blast_cache"
@@ -382,18 +451,21 @@ process blastn_microbial_host_hits {
       fi
     fi
 
-    : > results_blastn.txt
+    : > ${out_name}
     ids ${fasta_file} | while read -r id; do
       f="\$CACHE/\$(safe "\$id")"
       if [ -e "\$f.done" ]; then
-        if [ -f "\$f.txt" ]; then cat "\$f.txt" >> results_blastn.txt; fi
+        if [ -f "\$f.txt" ]; then cat "\$f.txt" >> ${out_name}; fi
       else
-        printf 'failed\\t%s\\n' "\$id" >> results_blastn.txt
+        printf 'failed\\t%s\\n' "\$id" >> ${out_name}
       fi
     done
     """
 }
 
+// Merge the results of the chunks of one sample and method. The query chunks come with the results, so a chunk
+// which has no result file (its task failed or was killed) is written as "failed" for each of its reads, instead
+// of the sample losing all its BLAST results.
 process merge_blast_results {
 
     label "process_single"
@@ -401,14 +473,23 @@ process merge_blast_results {
     publishDir "${params.outdir}/intermediate/", mode: 'copy'
 
     input:
-    tuple val(unique_id), val(method), path(results, stageAs: "chunk_*.txt")
+    tuple val(unique_id), val(method), path(queries, stageAs: "queries/*"), path(results, stageAs: "chunk_results/*")
 
     output:
     tuple val(unique_id), path("${unique_id}.${method}.results_blastn.txt")
 
     script:
     """
-    cat chunk_*.txt > "${unique_id}.${method}.results_blastn.txt"
+    : > "${unique_id}.${method}.results_blastn.txt"
+    for q in queries/*.fasta; do
+      f="chunk_results/results_\$(basename "\$q" .fasta).txt"
+      if [ -f "\$f" ]; then
+        cat "\$f"
+      else
+        echo "No BLAST result for \$q, marking its reads as failed" >&2
+        grep '^>' "\$q" | sed 's/^>//; s/[ \t].*//' | awk '{print "failed\t" \$0}' || true
+      fi
+    done >> "${unique_id}.${method}.results_blastn.txt"
     """
 }
 
@@ -460,9 +541,14 @@ workflow verify_microbial_host_hits {
             }
             .set{ blast_chunks_ch }
         blastn_microbial_host_hits(blast_chunks_ch, blast_db)
+        // remainder: a sample with a chunk which failed (or all of them) is still merged, once the others are done
         blastn_microbial_host_hits.out
-            .groupTuple()
-            .map{ unique_id, methods, results -> [unique_id, methods[0], results] }
+            .groupTuple(remainder: true)
+            .map{ unique_id, methods, results -> [unique_id.toString(), methods[0], results] }
+            .set{ blast_results_ch }
+        split_blast_queries.out
+            .join(blast_results_ch, by: [0, 1], remainder: true)
+            .map{ unique_id, method, chunks, results -> [unique_id, method, chunks, results ?: []] }
             | merge_blast_results
         merge_blast_results.out
             .map{ unique_id, result -> [unique_id.toString(), result] }

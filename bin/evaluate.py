@@ -10,6 +10,7 @@ import numpy as np
 from simplesam import Reader
 import gzip
 import math
+import re
 from collections import defaultdict
 
 ebv_accs = ["NC_007605.1","NC_009334.1"]
@@ -80,7 +81,21 @@ def load_contaminant_accs(path):
                     accs.append(acc)
     return accs
 
-MAP_COLUMNS = ["read_id","ref","ref_name","pos","ref_start","ref_end","mapped_length","mismatches","identity","divergence","seq_length","gc_ratio","5mer_ratio","sam_mean_quality","A","C","G","T","mapped_prop","mates_mapped"]
+MAP_COLUMNS = ["read_id","ref","ref_name","pos","ref_start","ref_end","mapped_length","mismatches","identity","divergence","seq_length","gc_ratio","5mer_ratio","sam_mean_quality","A","C","G","T","mapped_prop","mates_mapped",
+               "mapq","strand","query_start","query_end","n_supplementary","supp_aligned_length","total_aligned_prop"]
+
+CIGAR_OPS = re.compile(r"(\d+)([MIDNSHP=X])")
+
+def cigar_summary(cigar):
+    """Return (clip_left, clip_right, aligned_query_length) for a CIGAR string. Soft and hard clips count as clipped;
+    the aligned query length is the part of the read in the alignment (M, I, = and X)."""
+    ops = [(int(n), op) for n, op in CIGAR_OPS.findall(cigar or "")]
+    if not ops:
+        return 0, 0, 0
+    clip_left = ops[0][0] if ops[0][1] in "SH" else 0
+    clip_right = ops[-1][0] if ops[-1][1] in "SH" and len(ops) > 1 else 0
+    aligned = sum(n for n, op in ops if op in "MI=X")
+    return clip_left, clip_right, aligned
 
 def load_map_info_from_sam(sam):
     # One entry per read name. For paired reads both mates share a name, and the pair is described by the
@@ -89,12 +104,20 @@ def load_map_info_from_sam(sam):
     sys.stderr.write("LOAD MAP INFO FROM: " + sam + "\n")
     if (os.path.getsize(sam) > 0):
         map_details = []
+        # supplementary alignments (the other pieces of a read which maps in parts, e.g. a chimera) are not
+        # reported as the read's mapping, but are counted: how many there are and how much of the read they cover
+        supplementary = defaultdict(lambda: [0, 0])
         in_file = open(sam, 'r')
         in_sam = Reader(in_file)
         for x in in_sam:
             read_id, status, ref, pos, ref_coords, mapped_length = x.qname, x.flag, x.rname, x.pos, x.coords, len(x)
             # skip unmapped (0x4), secondary (0x100) and supplementary (0x800) alignments. For single-end reads
             # that leaves flags 0 and 16, as before; for pairs it keeps the primary alignment of each mate.
+            if status & 0x800 and not status & 0x104:
+                supp_aligned = cigar_summary(x.cigar)[2]
+                supplementary[read_id][0] += 1
+                supplementary[read_id][1] += supp_aligned
+                continue
             if status & 0x904:
                 continue
             mismatches, divergence =  x.tags["NM"], x.tags["de"]
@@ -116,6 +139,13 @@ def load_map_info_from_sam(sam):
                 entry[motif] = x.gapped('seq').count(motif)
             entry["mapped_prop"] = entry["mapped_length"] / entry["seq_length"]
             entry["mates_mapped"] = 1
+            clip_left, clip_right, aligned = cigar_summary(x.cigar)
+            entry["mapq"] = int(x.mapq)
+            entry["strand"] = "-" if status & 0x10 else "+"
+            # where the aligned part sits in the read, counted from the start of the read as sequenced (the CIGAR of a
+            # reverse strand alignment runs the other way)
+            entry["query_start"] = clip_right if status & 0x10 else clip_left
+            entry["query_end"] = entry["query_start"] + aligned
             if read_id in best:
                 other = best[read_id]
                 if entry["mapped_length"] > other["mapped_length"]:
@@ -127,6 +157,11 @@ def load_map_info_from_sam(sam):
                 best[read_id] = entry
             if len(best) % 10000 == 0:
                 sys.stderr.write("Processed " + str(len(best)) + "\n")
+        for read_id, entry in best.items():
+            n_supp, supp_aligned = supplementary.get(read_id, (0, 0))
+            entry["n_supplementary"] = n_supp
+            entry["supp_aligned_length"] = supp_aligned
+            entry["total_aligned_prop"] = (entry["query_end"] - entry["query_start"] + supp_aligned) / entry["seq_length"]
         # a SAM with a header but no alignments still needs the columns
         df = pd.DataFrame(list(best.values()), columns=MAP_COLUMNS)
     else:

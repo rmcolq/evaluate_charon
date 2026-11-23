@@ -81,9 +81,26 @@ rate limited, so the pipeline keeps requests small and tolerant of failures:
 - a read whose search still fails is written as `failed` and gets `blast_failed = true` in the leak tables. It is counted in
   `num_microbial_map_host_blast_failed_<classifier>` and is neither verified nor shown to be non-human. The run does not stop and
   the summary is still written.
+- if a whole BLAST chunk task fails (killed, out of memory, out of time) the reads of that chunk are written as `failed` too,
+  and the other chunks of the sample are kept. Such a sample is merged once the other BLAST tasks have finished, which can
+  be late in the run.
 - the reads that BLAST is asked about (unique, before any `--blast_max_reads` cap) are published as
   `<outdir>/<sample>/<sample>_<method>_blast_queries.fasta.gz`, so the BLAST step can be run again later, for example against a
   local database or after remote searches failed. Read ids match the classifier's, so the hits can be joined back to the leak tables.
+
+### Reads kept for a closer look
+
+With `--publish_reads` (the default) the reads each method calls microbial are copied to
+`<outdir>/<sample>/reads/<sample>_<method>_microbial[_1|_2].fastq.gz`. charon does not extract the reads it leaves unclassified,
+so for charon these are taken from the input by name (the rows with status `U` in its report) and written as
+`<sample>_<method>_unclassified*.fastq.gz`. With `--map_unclassified` (the default) they are also mapped to the reference
+(`intermediate/<sample>.<method>.unclassified.sam`) and summarised per read in `<sample>_<method>_unclassified_alignments.csv.gz`.
+These extra steps ignore failures, so they cannot stop a sample.
+
+The mapping columns of the full and leak tables also say where the aligned part of a read is (`query_start`, `query_end`,
+in the read as sequenced), `mapq`, `strand`, how many supplementary alignments the read has (`n_supplementary`) and how much of the
+read they cover (`supp_aligned_length`), and `total_aligned_prop`, the fraction of the read covered by the primary and
+supplementary alignments together. A long read with only a short human piece is then visible as such (chimera or repeat).
 
 Real contaminants such as Mycoplasma should be added to the reference in `--refs`, and their accessions listed (whitespace or
 comma separated) in a file passed with `--contaminant_accs`, so that they are not scored as human leaks.
