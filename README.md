@@ -94,7 +94,7 @@ With `--publish_reads` (the default) the reads each method calls microbial are c
 `<outdir>/<sample>/reads/<sample>_<method>_microbial[_1|_2].fastq.gz`. charon does not extract the reads it leaves unclassified,
 so for charon these are taken from the input by name (the rows with status `U` in its report) and written as
 `<sample>_<method>_unclassified*.fastq.gz`. With `--map_unclassified` (the default) they are also mapped to the reference
-(`intermediate/<sample>.<method>.unclassified.sam`) and summarised per read in `<sample>_<method>_unclassified_alignments.csv.gz`.
+(`<sample>/mapped/<sample>.<method>.unclassified.sam`) and summarised per read in `<sample>_<method>_unclassified_alignments.csv.gz`.
 These extra steps ignore failures, so they cannot stop a sample.
 
 The mapping columns of the full and leak tables also say where the aligned part of a read is (`query_start`, `query_end`,

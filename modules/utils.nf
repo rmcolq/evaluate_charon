@@ -219,7 +219,7 @@ process minimap2_host {
     conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
 
-    publishDir "${params.outdir}/intermediate/", mode: 'copy', pattern: "*.sam"
+    publishDir "${params.outdir}/${unique_id}/mapped/", mode: 'copy', pattern: "*.sam"
 
     input:
         tuple val(unique_id), val(method), path(fastq)
@@ -287,7 +287,7 @@ process minimap2_unclassified {
     tag "${unique_id}"
     conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
-    publishDir "${params.outdir}/intermediate/", mode: 'copy', pattern: "*.sam"
+    publishDir "${params.outdir}/${unique_id}/mapped/", mode: 'copy', pattern: "*.sam"
 
     input:
         tuple val(unique_id), val(method), path(fastq)
@@ -470,7 +470,7 @@ process merge_blast_results {
 
     label "process_single"
     tag "${unique_id}"
-    publishDir "${params.outdir}/intermediate/", mode: 'copy'
+    publishDir "${params.outdir}/${unique_id}/blast/", mode: 'copy'
 
     input:
     tuple val(unique_id), val(method), path(queries, stageAs: "queries/*"), path(results, stageAs: "chunk_results/*")
@@ -498,7 +498,7 @@ process cat_all_microbial_sam_files {
     label "process_low"
     tag "${unique_id}"
     container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
-    publishDir "${params.outdir}/intermediate/", mode: 'copy', pattern: "*.sam"
+    publishDir "${params.outdir}/${unique_id}/mapped/", mode: 'copy', pattern: "*.sam"
 
     input:
     tuple val(unique_id), val(method), path(sam_files)

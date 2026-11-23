@@ -5,7 +5,7 @@ Run these after the pipeline, on its `--outdir`. They need Python with `pandas`,
 
 | Script | What it does |
 | --- | --- |
-| `leak_regions.py` | Positions of microbial-called reads that map to the human reference (from `intermediate/*.microbial.sam`): per-read, per-locus, per-bin tables and a summary. |
+| `leak_regions.py` | Positions of microbial-called reads that map to the human reference (from `<sample>/mapped/*.microbial.sam`): per-read, per-locus, per-bin tables and a summary. |
 | `compare_common.py` | Host / microbial / unclassified calls on the reads every classifier processed, with 95% Wilson intervals. Reports reads Charon filtered out (below its min quality / length) separately. |
 | `plot_leak_ideogram.py` | One figure per chromosome (chr1-22, X, Y, M) and a PDF: repeat-content and gene tracks, CenSat/rDNA and segdups, then a read-density heatmap per classifier. Also writes `enrichment.tsv`. |
 | `plot_leak_by_chromosome.py` | Leaked reads per chromosome for each classifier, raw and per 100 Mb, with a chi-square test against length-proportional spread. |
