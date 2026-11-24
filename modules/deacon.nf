@@ -37,15 +37,17 @@ process run_deacon {
     script:
     // fastq is one file, or R1 and R2 of a pair (deacon counts a hit in either mate for the pair).
     // extra_args are applied to both calls so that the human and microbial sets are exact complements
-    def outputs = { category ->
-        is_paired(fastq) ?
-            "-o ${name}_${unique_id}_${category}_1.fq.gz -O ${name}_${unique_id}_${category}_2.fq.gz" :
-            "-o ${name}_${unique_id}_${category}.fq.gz"
-    }
     """
-    deacon filter ${extra_args} ${deacon_index} ${fastq} ${outputs('human')}
-    deacon filter -d ${extra_args} ${deacon_index} ${fastq} ${outputs('microbial')}
+    deacon filter ${extra_args} ${deacon_index} ${fastq} ${deacon_output_args(name, unique_id, 'human', fastq)}
+    deacon filter -d ${extra_args} ${deacon_index} ${fastq} ${deacon_output_args(name, unique_id, 'microbial', fastq)}
     """
+}
+
+// deacon options naming the output file(s) of a category: -o, plus -O for the second mate of a pair
+def deacon_output_args(name, unique_id, category, reads) {
+    return is_paired(reads) ?
+        "-o ${name}_${unique_id}_${category}_1.fq.gz -O ${name}_${unique_id}_${category}_2.fq.gz" :
+        "-o ${name}_${unique_id}_${category}.fq.gz"
 }
 
 // Output file(s) of a category: one file, or _1 and _2 for a pair

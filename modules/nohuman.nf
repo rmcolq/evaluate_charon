@@ -34,15 +34,17 @@ process run_nohuman {
 
     script:
     // fastq is one file, or R1 and R2 of a pair
-    def outputs = { category ->
-        is_paired(fastq) ?
-            "--out1 nohuman_${unique_id}_${category}_1.fq.gz --out2 nohuman_${unique_id}_${category}_2.fq.gz" :
-            "-o nohuman_${unique_id}_${category}.fq.gz"
-    }
     """
-    nohuman --db ${nohuman_index} -t ${task.cpus} ${outputs('microbial')} ${fastq}
-    nohuman --human --db ${nohuman_index} -t ${task.cpus} ${outputs('human')} ${fastq}
+    nohuman --db ${nohuman_index} -t ${task.cpus} ${nohuman_output_args(unique_id, 'microbial', fastq)} ${fastq}
+    nohuman --human --db ${nohuman_index} -t ${task.cpus} ${nohuman_output_args(unique_id, 'human', fastq)} ${fastq}
     """
+}
+
+// nohuman options naming the output file(s) of a category: -o, or --out1/--out2 for a pair
+def nohuman_output_args(unique_id, category, reads) {
+    return is_paired(reads) ?
+        "--out1 nohuman_${unique_id}_${category}_1.fq.gz --out2 nohuman_${unique_id}_${category}_2.fq.gz" :
+        "-o nohuman_${unique_id}_${category}.fq.gz"
 }
 
 // Output file(s) of a category: one file, or _1 and _2 for a pair
