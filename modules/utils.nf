@@ -11,6 +11,19 @@ def paired_input() {
     return params.paired || params.fastq2 || params.fastq_pairs_csv
 }
 
+// The BLAST cache (--blast_cache) is kept in <store_dir>/blast_cache, outside the task directory, so it must be
+// mounted into the BLAST container; it is created first so that docker does not create it as root.
+def blast_cache_root() {
+    return file(params.store_dir).toAbsolutePath().normalize().toString() + "/blast_cache"
+}
+
+def blast_cache_mount() {
+    if (!params.blast_cache || !workflow.containerEngine)
+        return ''
+    def dir = blast_cache_root()
+    return workflow.containerEngine in ['singularity', 'apptainer'] ? "-B ${dir}" : "-v ${dir}:${dir}"
+}
+
 def minimap2_preset() {
     return (paired_input() || params.read_type == "illumina") ? "sr" : "map-ont"
 }
@@ -397,6 +410,7 @@ process blastn_microbial_host_hits {
     label "process_long"
     conda "bioconda::blast=2.16.0"
     container "ncbi/blast"
+    containerOptions { blast_cache_mount() }
     maxForks params.blast_db ? 4 : 1
 
     input:
@@ -410,7 +424,7 @@ process blastn_microbial_host_hits {
     out_name = "results_${fasta_file.baseName}.txt"
     remote = !params.blast_db
     dbopts = remote ? "-db nt -remote" : "-db ${blast_db}/nt -num_threads 4"
-    cache = params.blast_cache ? "${file(params.store_dir).toAbsolutePath()}/blast_cache/${unique_id}" : "\$PWD/blast_cache"
+    cache = params.blast_cache ? "${blast_cache_root()}/${unique_id}" : "\$PWD/blast_cache"
     outfmt = '"6 qseqid sacc sscinames staxids sstart send evalue pident length bitscore qcovs"'
     // Best hit is chosen by bitscore downstream, so keep enough targets that human hits do not crowd out the rest.
     // The second search excludes human (taxid 9606) to find the best non-human hit; every line is prefixed
@@ -530,6 +544,8 @@ workflow verify_microbial_host_hits {
         blast_ch = Channel.empty()
         ref_bed = file(resolve_path(params.ref_bed), type: "file", checkIfExists:true)
         extract_microbial_host_hits(microbial_fastq_ch, ref_bed)
+        if (params.blast_cache)
+            file(blast_cache_root()).mkdirs()
         
         if (params.blast_db)
             blast_db = file(params.blast_db, type: "dir", checkIfExists:true)
