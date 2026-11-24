@@ -20,7 +20,7 @@ process run_charon {
     container params.charon_container 
     maxForks 4
 
-    publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
+    publishDir path: { "${params.outdir}/${unique_id}/" }, mode: 'copy', pattern: "*.out"
 
 
     input:
@@ -58,7 +58,7 @@ process run_charon_chunk {
     container params.charon_container
     maxForks 4
 
-    publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
+    publishDir path: { "${params.outdir}/${unique_id}/" }, mode: 'copy', pattern: "*.out"
 
 
     input:

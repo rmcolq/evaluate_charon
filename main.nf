@@ -3,6 +3,39 @@ include { stage_fastq; resolve_path; paired_input } from './modules/utils'
 include { evaluate_dehosting } from './modules/evaluate_dehosting'
 include { throttle_samples; release_finished_samples } from './modules/gate'
 
+// Types of the boolean and numeric parameters. Nextflow 26 passes command-line values to the script as strings
+// unless the parameter is declared here, so `--charon false` would count as true and `--host_eval_reads 10` would
+// not be a number. Defaults are in conf/params.config.
+params {
+    paired: Boolean
+    charon: Boolean
+    charon_host_only: Boolean
+    deacon: Boolean
+    deacon_sensitive: Boolean
+    nohuman: Boolean
+    evaluate_host: Boolean
+    evaluate_microbial: Boolean
+    publish_reads: Boolean
+    map_unclassified: Boolean
+    blast_nonhuman: Boolean
+    blast_cache: Boolean
+    reset_slots: Boolean
+    eager_cleanup: Boolean
+    s3_anonymous: Boolean
+    max_cpus: Integer
+    host_eval_reads: Integer
+    chunk_size: Integer
+    charon_chunk_size: Integer
+    max_concurrent_samples: Integer
+    slot_timeout: Integer
+    blast_max_targets: Integer
+    blast_chunk_reads: Integer
+    blast_max_reads: Integer?
+    blast_min_cov: Float
+    blast_min_pident: Float
+    blast_bitscore_ratio: Float
+}
+
 // Download remote inputs once; local files are used where they are.
 workflow stage_remote {
     take:
@@ -73,8 +106,10 @@ workflow {
         evaluate_dehosting(stage_remote.out)
         done_ch = evaluate_dehosting.out.done
     } else if (params.fastq){
-        unique_id = "${params.unique_id}"
         fastq = file(params.fastq, type: "file", checkIfExists:true)
+        // a plain String: a GString key would not match the String keys used in joins further down.
+        // Without --unique_id, the name of the (first) FASTQ file without .fq/.fastq(.gz)
+        unique_id = params.unique_id ? params.unique_id.toString() : fastq.name.replaceAll(/\.(fq|fastq)(\.gz)?$/, '')
         reads = params.fastq2 ? [fastq, file(params.fastq2, type: "file", checkIfExists:true)] : fastq
         fastq_ch = Channel.from([[unique_id, reads]])
         throttle_samples(fastq_ch)
@@ -82,7 +117,7 @@ workflow {
         evaluate_dehosting(stage_remote.out)
         done_ch = evaluate_dehosting.out.done
     } else {
-        exit 1, "Please either provide a CSV with --bam_csv (specifying sample_id,filepath), a CSV of FASTQ pairs with --fastq_pairs_csv (sample_id,fastq_1,fastq_2), a directory of fastq with --fastq_dir (each file for sample) or --fastq (and --fastq2) and --unique_id"
+        exit 1, "Please either provide a CSV with --bam_csv (specifying sample_id,filepath), a CSV of FASTQ pairs with --fastq_pairs_csv (sample_id,fastq_1,fastq_2), a directory of fastq with --fastq_dir (each file for sample) or --fastq (and --fastq2), with --unique_id to name the sample"
     }
 
     // free each sample's slot once every enabled method has finished with it

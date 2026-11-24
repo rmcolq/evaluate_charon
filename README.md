@@ -20,7 +20,7 @@ Give paired input, one of:
 | Input | Option |
 | --- | --- |
 | BAM/CRAM of read pairs (e.g. 1000 Genomes high-coverage CRAM) | `--bam_csv` (`sample_id,filepath`) with `--paired true`, plus `--cram_ref <reference.fa>` for a CRAM |
-| FASTQ pairs | `--fastq_pairs_csv` (`sample_id,fastq_1,fastq_2`), or `--fastq` with `--fastq2` and `--unique_id` |
+| FASTQ pairs | `--fastq_pairs_csv` (`sample_id,fastq_1,fastq_2`), or `--fastq` with `--fastq2` (and `--unique_id`; default the first file's name) |
 
 FASTQ pairs are recognised as pairs without `--paired`; a BAM/CRAM needs it, because the file does not say whether it
 holds pairs.

@@ -224,7 +224,7 @@ process minimap2_host {
     conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
 
-    publishDir "${params.outdir}/${unique_id}/mapped/", mode: 'copy', pattern: "*.sam"
+    publishDir path: { "${params.outdir}/${unique_id}/mapped/" }, mode: 'copy', pattern: "*.sam"
 
     input:
         tuple val(unique_id), val(method), path(fastq)
@@ -262,7 +262,7 @@ process extract_microbial_host_hits {
     conda "bioconda::samtools=1.21"
     container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
     // The reads to search, before any --blast_max_reads cap, kept so the BLAST step can be run again later
-    publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*_blast_queries.fasta.gz"
+    publishDir path: { "${params.outdir}/${unique_id}/" }, mode: 'copy', pattern: "*_blast_queries.fasta.gz"
 
     input:
     tuple val(unique_id), val(method), path(sam_file)
@@ -292,7 +292,7 @@ process minimap2_unclassified {
     tag "${unique_id}"
     conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
-    publishDir "${params.outdir}/${unique_id}/mapped/", mode: 'copy', pattern: "*.sam"
+    publishDir path: { "${params.outdir}/${unique_id}/mapped/" }, mode: 'copy', pattern: "*.sam"
 
     input:
         tuple val(unique_id), val(method), path(fastq)
@@ -312,7 +312,7 @@ process alignment_table {
     label "error_ignore"
     tag "${unique_id}"
     container 'community.wave.seqera.io/library/simplesam_numpy_pandas_pip_taxoniq:3af1649bdaf86fca'
-    publishDir "${params.outdir}/${unique_id}/", mode: 'copy'
+    publishDir path: { "${params.outdir}/${unique_id}/" }, mode: 'copy'
 
     input:
         tuple val(unique_id), val(method), path(sam)
@@ -331,7 +331,7 @@ process publish_reads {
     label "process_single"
     label "error_ignore"
     tag "${unique_id}"
-    publishDir "${params.outdir}/${unique_id}/reads/", mode: 'copy'
+    publishDir path: { "${params.outdir}/${unique_id}/reads/" }, mode: 'copy'
 
     input:
     tuple val(unique_id), val(method), val(category), path(reads, stageAs: "in/*")
@@ -475,7 +475,7 @@ process merge_blast_results {
 
     label "process_single"
     tag "${unique_id}"
-    publishDir "${params.outdir}/${unique_id}/blast/", mode: 'copy'
+    publishDir path: { "${params.outdir}/${unique_id}/blast/" }, mode: 'copy'
 
     input:
     tuple val(unique_id), val(method), path(queries, stageAs: "queries/*"), path(results, stageAs: "chunk_results/*")
@@ -503,7 +503,7 @@ process cat_all_microbial_sam_files {
     label "process_low"
     tag "${unique_id}"
     container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
-    publishDir "${params.outdir}/${unique_id}/mapped/", mode: 'copy', pattern: "*.sam"
+    publishDir path: { "${params.outdir}/${unique_id}/mapped/" }, mode: 'copy', pattern: "*.sam"
 
     input:
     tuple val(unique_id), val(method), path(sam_files)
@@ -528,13 +528,13 @@ workflow verify_microbial_host_hits {
 
     main:
         blast_ch = Channel.empty()
-        ref_bed = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true)
+        ref_bed = file(resolve_path(params.ref_bed), type: "file", checkIfExists:true)
         extract_microbial_host_hits(microbial_fastq_ch, ref_bed)
         
         if (params.blast_db)
             blast_db = file(params.blast_db, type: "dir", checkIfExists:true)
         else
-            blast_db = file("$projectDir/${params.ref_bed}", type: "file", checkIfExists:true) // any file will do to not block
+            blast_db = file(resolve_path(params.ref_bed), type: "file", checkIfExists:true) // any file will do to not block
 
         split_blast_queries(extract_microbial_host_hits.out.query)
         // one item per chunk; the sample's groupKey carries the number of chunks, so the results of a sample are
@@ -551,7 +551,9 @@ workflow verify_microbial_host_hits {
             .groupTuple(remainder: true)
             .map{ unique_id, methods, results -> [unique_id.toString(), methods[0], results] }
             .set{ blast_results_ch }
+        // the sample id arrives as a groupKey from earlier grouping; join needs plain String keys on both sides
         split_blast_queries.out
+            .map{ unique_id, method, chunks -> [unique_id.toString(), method, chunks] }
             .join(blast_results_ch, by: [0, 1], remainder: true)
             .map{ unique_id, method, chunks, results -> [unique_id, method, chunks, results ?: []] }
             | merge_blast_results
@@ -569,7 +571,7 @@ process evaluate_summary {
     label "process_low"
     tag "${unique_id}"
     container 'community.wave.seqera.io/library/simplesam_numpy_pandas_pip_taxoniq:3af1649bdaf86fca'
-    publishDir "${params.outdir}/${unique_id}/", mode: 'copy'
+    publishDir path: { "${params.outdir}/${unique_id}/" }, mode: 'copy'
 
     input:
     tuple val(unique_id), val(classifier), path(report), path(host_sam), path(host_sampled_ids), path(microbial_sam), path(blast_result)

@@ -61,7 +61,7 @@ process collect_classifications {
     tag "${unique_id}"
     container 'community.wave.seqera.io/library/deacon:0.20.0--903cc7096f1e9938'
 
-    publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
+    publishDir path: { "${params.outdir}/${unique_id}/" }, mode: 'copy', pattern: "*.out"
 
     input:
     tuple val(unique_id), val(name), path(microbial_fastq), path(host_fastq)
