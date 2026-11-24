@@ -6,8 +6,13 @@ def resolve_path(String path) {
     return (path.startsWith('/') || path.contains('://')) ? file(path) : file("${projectDir}/${path}")
 }
 
+// Paired input: FASTQ pairs are paired by their shape; a BAM/CRAM only when --paired says so.
+def paired_input() {
+    return params.paired || params.fastq2 || params.fastq_pairs_csv
+}
+
 def minimap2_preset() {
-    return (params.paired || params.read_type == "illumina") ? "sr" : "map-ont"
+    return (paired_input() || params.read_type == "illumina") ? "sr" : "map-ont"
 }
 
 // Reads travel through the pipeline as one channel item: a single file, or a list of two files (R1, R2)

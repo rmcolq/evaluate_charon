@@ -1,5 +1,5 @@
 include { bam_to_fastq } from './modules/utils'
-include { stage_fastq; resolve_path } from './modules/utils'
+include { stage_fastq; resolve_path; paired_input } from './modules/utils'
 include { evaluate_dehosting } from './modules/evaluate_dehosting'
 include { throttle_samples; release_finished_samples } from './modules/gate'
 
@@ -25,11 +25,8 @@ workflow stage_remote {
 // Slots left behind by a crashed or killed run would block this one, so clear them on start and on
 // exit. This assumes slot_dir is used by one pipeline at a time (use a different --slot_dir per
 // concurrent pipeline, or --reset_slots false to share a limit across pipelines).
-workflow.onComplete {
-    if (params.reset_slots) file(params.slot_dir).deleteDir()
-}
-
 workflow {
+    main:
     if (params.reset_slots) file(params.slot_dir).deleteDir()
 
     // Check if required parameters are provided
@@ -40,15 +37,12 @@ workflow {
         exit 1, "Please provide --db_host_only (a charon index of the host only) when running Nextflow with --charon_host_only."
     }
 
-    // Paired reads: from a BAM/CRAM of pairs (--bam_csv), or FASTQ pairs (--fastq_pairs_csv, or --fastq and --fastq2).
-    // --paired also selects the short read mapping preset, so it has to be given with them.
+    // Paired reads: FASTQ pairs (--fastq_pairs_csv, or --fastq and --fastq2) are paired by themselves; a BAM/CRAM
+    // of pairs (--bam_csv) needs --paired, because the file does not say whether it holds pairs.
     if (params.paired && (params.fastq_dir || (params.fastq && !params.fastq2))) {
         exit 1, "--paired needs --bam_csv, --fastq_pairs_csv, or --fastq with --fastq2 (--fastq_dir is not supported for pairs)."
     }
-    if ((params.fastq_pairs_csv || params.fastq2) && !params.paired) {
-        exit 1, "Please also give --paired true when providing paired FASTQ files."
-    }
-    if (params.paired && params.read_type != "illumina") {
+    if (paired_input() && params.read_type != "illumina") {
         log.info "Paired reads are mapped as short reads (the sr preset), whatever --read_type is."
     }
 
@@ -94,4 +88,7 @@ workflow {
     // free each sample's slot once every enabled method has finished with it
     n_methods = [params.charon, params.charon_host_only, params.deacon, params.deacon_sensitive, params.nohuman].count{ it }
     release_finished_samples(done_ch, n_methods)
+
+    onComplete:
+    if (params.reset_slots) file(params.slot_dir).deleteDir()
 }

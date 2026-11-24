@@ -15,12 +15,15 @@ been solved on every platform: if a package fails to resolve, relax its version 
 
 ## Paired reads (Illumina)
 
-Add `--paired true` and give paired input, one of:
+Give paired input, one of:
 
 | Input | Option |
 | --- | --- |
-| BAM/CRAM of read pairs (e.g. 1000 Genomes high-coverage CRAM) | `--bam_csv` (`sample_id,filepath`), plus `--cram_ref <reference.fa>` for a CRAM |
+| BAM/CRAM of read pairs (e.g. 1000 Genomes high-coverage CRAM) | `--bam_csv` (`sample_id,filepath`) with `--paired true`, plus `--cram_ref <reference.fa>` for a CRAM |
 | FASTQ pairs | `--fastq_pairs_csv` (`sample_id,fastq_1,fastq_2`), or `--fastq` with `--fastq2` and `--unique_id` |
+
+FASTQ pairs are recognised as pairs without `--paired`; a BAM/CRAM needs it, because the file does not say whether it
+holds pairs.
 
 A BAM/CRAM is converted to R1/R2 FASTQ (primary alignments, reads without a mate dropped). Paths can be local or
 `s3://`. Each pair travels through the pipeline as one item: charon, deacon and nohuman take both files and call
