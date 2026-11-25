@@ -13,6 +13,7 @@ reference to find mistakes, and confirms human reads left among the microbial ca
    conda env create -f environment.yml
    conda activate evaluate_charon
    ```
+
    With `-profile conda` the pipeline's processes use this environment too, except Charon, which needs a container.
 
 2. **Reference.** `--refs` is the human (T2T) + EBV + fungi + Mycoplasma reference used for mapping, with `--ref_bed`
@@ -89,11 +90,23 @@ CHARON_DB_ONT=charon_big.nanopore.idx CHARON_DB_ILLUMINA=charon_big.illumina.idx
   scripts/run_hall.sh results/hall
 ```
 
-The shuffled reads and Charon indexes are being deposited on Zenodo; until then the manifests' URLs are placeholders.
-`scripts/shuffle_reads.sh` shuffles other read files the same way.
+The original reads are on Zenodo:
+
+| Dataset | Zenodo record | Files |
+|---|---|---|
+| Simulated, Illumina | [8339791](https://zenodo.org/records/8339791) | `metagenome_R1.illumina.fq.gz`, `metagenome_R2.illumina.fq.gz` |
+| Simulated, nanopore | [8339789](https://zenodo.org/records/8339789) | `metagenome.ont.fq.gz` |
+| Artificial, both | [10472796](https://zenodo.org/records/10472796) | `all_1.illumina.fq.gz`, `all_2.illumina.fq.gz`, `all.ont.fq.gz`, `read2truth.{illumina,ont}.tsv` |
+
+The shuffled copies (`*.shuffled.fq.gz`) and the Charon indexes are being deposited on Zenodo; until then the
+manifests' URLs are placeholders. `scripts/shuffle_reads.sh` shuffles other read files the same way.
 
 **Human samples (HPRC).** `manifests/human_nanopore.csv` (and a 10-sample `human_nanopore_mini.csv`) and
-`manifests/human_illumina_paired.csv` list public HPRC reads on S3:
+`manifests/human_illumina_paired.csv` list public HPRC reads on S3. They are HPRC release 2 samples chosen so that none of
+their assemblies is in the Charon index: the indexes are built from the
+[charon-index-build](https://github.com/rmcolq/charon-index-build) manifests (`manifests/<profile>/human_assemblies.tsv`),
+which leave these samples out. Reads from a sample whose assembly is in the index would test recall of sequence the
+index already holds, not of unseen human genomes.
 
 ```bash
 nextflow run main.nf -profile docker --bam_csv manifests/human_nanopore_mini.csv --s3_anonymous true \
@@ -106,7 +119,8 @@ nextflow run main.nf -profile docker --bam_csv manifests/human_illumina_paired.c
   --evaluate_host true --evaluate_microbial true --blast_db /db/blast/core_nt --store_dir $PWD/store_dir --outdir results/hprc_illumina
 ```
 
-The Illumina CRAMs need the 1000 Genomes GRCh38 reference they were aligned to (`GRCh38_full_analysis_set_plus_decoy_hla.fa`).
+The Illumina CRAMs are CRAM 3.0 without an embedded reference, so they need the 1000 Genomes GRCh38 reference they
+were aligned to (`GRCh38_full_analysis_set_plus_decoy_hla.fa`, named in their `@SQ UR` tags).
 
 **Figures and tables.** The analysis scripts in `scripts/` run on the pipeline's output; see
 [scripts/README.md](scripts/README.md).
