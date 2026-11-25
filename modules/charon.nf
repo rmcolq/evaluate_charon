@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; is_paired; reads_prefix; reads_glob; publish_reads; minimap2_unclassified; alignment_table } from '../modules/utils'
+include { minimap2_microbial; minimap2_host; extract_blast_queries; is_paired; reads_prefix; reads_glob; publish_reads; minimap2_unclassified; alignment_table } from '../modules/utils'
 
 // Charon holds the whole index in memory and needs about 7 GB more than that for its reads and threads (peak_rss
 // was 14.2 GB with the 7.1 GB nanopore index, and 4.3 GB with a 0.2 GB host-only index). It is given 80% of the
@@ -20,7 +20,7 @@ process run_charon {
     container params.charon_container 
     maxForks 4
 
-    publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
+    publishDir path: { "${params.outdir}/${unique_id}/" }, mode: 'copy', pattern: "*.out"
 
 
     input:
@@ -58,7 +58,7 @@ process run_charon_chunk {
     container params.charon_container
     maxForks 4
 
-    publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
+    publishDir path: { "${params.outdir}/${unique_id}/" }, mode: 'copy', pattern: "*.out"
 
 
     input:
@@ -201,14 +201,13 @@ workflow evaluate_charon {
     minimap2_microbial(run_charon.out.microbial_fastq, refs)
     minimap2_host(run_charon.out.human_fastq, refs)
 
+    // BLAST is run once for all samples and methods (modules/blast.nf, called from modules/evaluate_dehosting.nf), so only the
+    // queries are extracted here
     if ( params.evaluate_microbial ){
-        verify_microbial_host_hits(minimap2_microbial.out.chunk_sam_ch)
-        // samples with no microbial reads have no BLAST step, so give them an empty result
-        verify_microbial_host_hits.out
-            .mix(minimap2_microbial.out.no_reads.map{ unique_id, method -> [unique_id, file("${projectDir}/resources/NO_BLAST")] })
-            .set{ blast_ch }
+        extract_blast_queries(minimap2_microbial.out.chunk_sam_ch)
+        query_ch = extract_blast_queries.out.queries
     } else {
-        blast_ch = Channel.empty()
+        query_ch = Channel.empty()
     }
 
 
@@ -216,7 +215,9 @@ workflow evaluate_charon {
     report = run_charon.out.result
     microbial_sam = minimap2_microbial.out.sam_ch
     host_sam = minimap2_host.out
-    blast = blast_ch
+    blast_queries = query_ch
+    // samples with no microbial reads have no queries
+    no_reads = minimap2_microbial.out.no_reads
 
 
 }

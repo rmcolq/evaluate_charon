@@ -23,12 +23,15 @@ index would test recall of sequence the index already holds, not of unseen human
 
 ## Paired reads (Illumina)
 
-Add `--paired true` and give paired input, one of:
+Give paired input, one of:
 
 | Input | Option |
 | --- | --- |
-| BAM/CRAM of read pairs (e.g. 1000 Genomes high-coverage CRAM) | `--bam_csv` (`sample_id,filepath`), plus `--cram_ref <reference.fa>` for a CRAM |
-| FASTQ pairs | `--fastq_pairs_csv` (`sample_id,fastq_1,fastq_2`), or `--fastq` with `--fastq2` and `--unique_id` |
+| BAM/CRAM of read pairs (e.g. 1000 Genomes high-coverage CRAM) | `--bam_csv` (`sample_id,filepath`) with `--paired true`, plus `--cram_ref <reference.fa>` for a CRAM |
+| FASTQ pairs | `--fastq_pairs_csv` (`sample_id,fastq_1,fastq_2`), or `--fastq` with `--fastq2` (and `--unique_id`; default the first file's name) |
+
+FASTQ pairs are recognised as pairs without `--paired`; a BAM/CRAM needs it, because the file does not say whether it
+holds pairs.
 
 A BAM/CRAM is converted to R1/R2 FASTQ (primary alignments, reads without a mate dropped). Paths can be local or
 `s3://`. Each pair travels through the pipeline as one item: charon, deacon and nohuman take both files and call
@@ -74,24 +77,29 @@ measured: the summary leaves the `*_microbial_unmapped/map_ebv/map_host/map_host
 Tier 4 needs `--evaluate_microbial` with `--blast_nonhuman` (the default), which adds a BLAST search with human (taxid 9606)
 excluded.
 
-BLAST searches the reads which were called microbial and map to the human reference. With `--blast_db` (a directory holding
-`nt` and the taxonomy files) the search is local. Without it the search is remote, against NCBI, which is slow and
-rate limited, so the pipeline keeps requests small and tolerant of failures:
+BLAST searches the reads which were called microbial and map to the human reference (`modules/blast.nf`, which takes any
+number of FASTA files). With `--blast_db` the search is local: give the database path without extensions, e.g.
+`--blast_db /db/blast/core_nt`, or a directory holding a database called `nt`. The taxonomy files (`taxdb.btd`, `taxdb.bti`,
+`taxonomy4blast.sqlite3`) must be in the same directory. `core_nt` is NCBI's default for web BLAST and much smaller than `nt`.
+Without `--blast_db` the search is remote, against NCBI's `nt`, which is slow and rate limited.
 
-- reads are sent in chunks of `--blast_chunk_reads` (default 20), one chunk at a time for a remote search;
+Each search reads the whole database, so the time is set by the number of searches rather than the number of reads. The
+reads of all samples and methods are therefore searched together, once every sample has been classified and mapped:
+
+- a read is searched once per sample, however many methods let it through, and not at all if its result is already in the
+  cache. Results are kept per read in `<store_dir>/blast_cache/<sample>` (`--blast_cache false` keeps them in the task
+  instead). `--store_dir` should be an absolute path;
+- the reads are searched in chunks of `--blast_chunk_reads`: by default 5000 for a local search, and 20 for a remote one, sent one
+  chunk at a time. A local search uses `--blast_threads` threads (default 16), which split the database between them;
 - each search is tried up to five times with a growing wait. A remote search is abandoned after `--blast_remote_timeout` (default `20m`)
   times the attempt number (20m, 40m, 60m, 80m, 100m), so a slow search gets longer on later attempts, and a search which
   finished is not repeated;
 - `--blast_max_reads` (default: all) searches a fixed random sample of that many reads per sample and method;
-- results are kept per read in `<store_dir>/blast_cache/<sample>` (`--blast_cache false` keeps them in the task instead), so a
-  read which leaked in several methods, or in an earlier run, is only searched once. `--store_dir` should be an absolute path
-  on a filesystem every task can see;
-- a read whose search still fails is written as `failed` and gets `blast_failed = true` in the leak tables. It is counted in
-  `num_microbial_map_host_blast_failed_<classifier>` and is neither verified nor shown to be non-human. The run does not stop and
-  the summary is still written.
-- if a whole BLAST chunk task fails (killed, out of memory, out of time) the reads of that chunk are written as `failed` too,
-  and the other chunks of the sample are kept. Such a sample is merged once the other BLAST tasks have finished, which can
-  be late in the run.
+- a read whose search still fails, or whose chunk task fails (killed, out of memory, out of time), is written as `failed` and gets
+  `blast_failed = true` in the leak tables. It is counted in `num_microbial_map_host_blast_failed_<classifier>` and is neither
+  verified nor shown to be non-human. The run does not stop and the summaries are still written;
+- the summaries are written once the search is done, so with several samples they all come near the end of the run. A sample's
+  slot (`--max_concurrent_samples`) is freed once every method has classified and mapped it, not when its summary is written;
 - the reads that BLAST is asked about (unique, before any `--blast_max_reads` cap) are published as
   `<outdir>/<sample>/<sample>_<method>_blast_queries.fasta.gz`, so the BLAST step can be run again later, for example against a
   local database or after remote searches failed. Read ids match the classifier's, so the hits can be joined back to the leak tables.

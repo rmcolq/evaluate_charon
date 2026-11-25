@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; publish_reads; is_paired; reads_prefix; reads_glob; first_file } from '../modules/utils'
+include { minimap2_microbial; minimap2_host; extract_blast_queries; publish_reads; is_paired; reads_prefix; reads_glob; first_file } from '../modules/utils'
 
 process download_nohuman_index {
     label "process_single"
@@ -34,15 +34,17 @@ process run_nohuman {
 
     script:
     // fastq is one file, or R1 and R2 of a pair
-    def outputs = { category ->
-        is_paired(fastq) ?
-            "--out1 nohuman_${unique_id}_${category}_1.fq.gz --out2 nohuman_${unique_id}_${category}_2.fq.gz" :
-            "-o nohuman_${unique_id}_${category}.fq.gz"
-    }
     """
-    nohuman --db ${nohuman_index} -t ${task.cpus} ${outputs('microbial')} ${fastq}
-    nohuman --human --db ${nohuman_index} -t ${task.cpus} ${outputs('human')} ${fastq}
+    nohuman --db ${nohuman_index} -t ${task.cpus} ${nohuman_output_args(unique_id, 'microbial', fastq)} ${fastq}
+    nohuman --human --db ${nohuman_index} -t ${task.cpus} ${nohuman_output_args(unique_id, 'human', fastq)} ${fastq}
     """
+}
+
+// nohuman options naming the output file(s) of a category: -o, or --out1/--out2 for a pair
+def nohuman_output_args(unique_id, category, reads) {
+    return is_paired(reads) ?
+        "--out1 nohuman_${unique_id}_${category}_1.fq.gz --out2 nohuman_${unique_id}_${category}_2.fq.gz" :
+        "-o nohuman_${unique_id}_${category}.fq.gz"
 }
 
 // Output file(s) of a category: one file, or _1 and _2 for a pair
@@ -56,7 +58,7 @@ process collect_classifications {
     tag "${unique_id}"
     container 'community.wave.seqera.io/library/nohuman:0.5.1--69df84d3602dde50'
 
-    publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
+    publishDir path: { "${params.outdir}/${unique_id}/" }, mode: 'copy', pattern: "*.out"
 
     input:
     tuple val(unique_id), path(microbial_fastq), path(host_fastq)
@@ -97,19 +99,20 @@ workflow evaluate_nohuman {
     minimap2_microbial(run_nohuman.out.microbial_fastq, refs)
     minimap2_host(run_nohuman.out.human_fastq, refs)
 
+    // BLAST is run once for all samples and methods (modules/blast.nf, called from modules/evaluate_dehosting.nf), so only the
+    // queries are extracted here
     if ( params.evaluate_microbial ){
-        verify_microbial_host_hits(minimap2_microbial.out.chunk_sam_ch)
-        // samples with no microbial reads have no BLAST step, so give them an empty result
-        verify_microbial_host_hits.out
-            .mix(minimap2_microbial.out.no_reads.map{ unique_id, method -> [unique_id, file("${projectDir}/resources/NO_BLAST")] })
-            .set{ blast_ch }
+        extract_blast_queries(minimap2_microbial.out.chunk_sam_ch)
+        query_ch = extract_blast_queries.out.queries
     } else {
-        blast_ch = Channel.empty()
+        query_ch = Channel.empty()
     }
 
     emit:
         report = collect_classifications.out.result
         microbial_sam = minimap2_microbial.out.sam_ch
         host_sam = minimap2_host.out
-        blast = blast_ch
+        blast_queries = query_ch
+        // samples with no microbial reads have no queries
+        no_reads = minimap2_microbial.out.no_reads
 }

@@ -333,8 +333,13 @@ def load_tsv_output(path, classifier):
 
 def load_output(path, classifier):
     if classifier.startswith("charon"):
-        return classifier, load_charon_output(path, classifier)
-    return classifier, load_tsv_output(path, classifier)
+        df = load_charon_output(path, classifier)
+    else:
+        df = load_tsv_output(path, classifier)
+    # A pair is reported under the id of one mate, with /1 or /2 at the end. minimap2 drops that suffix in the SAM
+    # and the sampled host ids are written without it, so drop it here too, or no mapping result would join.
+    df["read_id"] = df["read_id"].astype(str).str.replace(r"/[12]$", "", regex=True)
+    return classifier, df
     
 
 def add_classified_counts_to_summary(df, summary, classifier):

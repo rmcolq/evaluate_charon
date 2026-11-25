@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-include { minimap2_microbial; minimap2_host; verify_microbial_host_hits; publish_reads; is_paired; reads_prefix; reads_glob; first_file } from '../modules/utils'
+include { minimap2_microbial; minimap2_host; extract_blast_queries; publish_reads; is_paired; reads_prefix; reads_glob; first_file } from '../modules/utils'
 
 process download_deacon_index {
     label "process_single"
@@ -37,15 +37,17 @@ process run_deacon {
     script:
     // fastq is one file, or R1 and R2 of a pair (deacon counts a hit in either mate for the pair).
     // extra_args are applied to both calls so that the human and microbial sets are exact complements
-    def outputs = { category ->
-        is_paired(fastq) ?
-            "-o ${name}_${unique_id}_${category}_1.fq.gz -O ${name}_${unique_id}_${category}_2.fq.gz" :
-            "-o ${name}_${unique_id}_${category}.fq.gz"
-    }
     """
-    deacon filter ${extra_args} ${deacon_index} ${fastq} ${outputs('human')}
-    deacon filter -d ${extra_args} ${deacon_index} ${fastq} ${outputs('microbial')}
+    deacon filter ${extra_args} ${deacon_index} ${fastq} ${deacon_output_args(name, unique_id, 'human', fastq)}
+    deacon filter -d ${extra_args} ${deacon_index} ${fastq} ${deacon_output_args(name, unique_id, 'microbial', fastq)}
     """
+}
+
+// deacon options naming the output file(s) of a category: -o, plus -O for the second mate of a pair
+def deacon_output_args(name, unique_id, category, reads) {
+    return is_paired(reads) ?
+        "-o ${name}_${unique_id}_${category}_1.fq.gz -O ${name}_${unique_id}_${category}_2.fq.gz" :
+        "-o ${name}_${unique_id}_${category}.fq.gz"
 }
 
 // Output file(s) of a category: one file, or _1 and _2 for a pair
@@ -59,7 +61,7 @@ process collect_classifications {
     tag "${unique_id}"
     container 'community.wave.seqera.io/library/deacon:0.20.0--903cc7096f1e9938'
 
-    publishDir "${params.outdir}/${unique_id}/", mode: 'copy', pattern: "*.out"
+    publishDir path: { "${params.outdir}/${unique_id}/" }, mode: 'copy', pattern: "*.out"
 
     input:
     tuple val(unique_id), val(name), path(microbial_fastq), path(host_fastq)
@@ -104,19 +106,20 @@ workflow evaluate_deacon {
     minimap2_microbial(run_deacon.out.microbial_fastq, refs)
     minimap2_host(run_deacon.out.human_fastq, refs)
 
+    // BLAST is run once for all samples and methods (modules/blast.nf, called from modules/evaluate_dehosting.nf), so only the
+    // queries are extracted here
     if ( params.evaluate_microbial ){
-        verify_microbial_host_hits(minimap2_microbial.out.chunk_sam_ch)
-        // samples with no microbial reads have no BLAST step, so give them an empty result
-        verify_microbial_host_hits.out
-            .mix(minimap2_microbial.out.no_reads.map{ unique_id, method -> [unique_id, file("${projectDir}/resources/NO_BLAST")] })
-            .set{ blast_ch }
+        extract_blast_queries(minimap2_microbial.out.chunk_sam_ch)
+        query_ch = extract_blast_queries.out.queries
     } else {
-        blast_ch = Channel.empty()
+        query_ch = Channel.empty()
     }
 
     emit:
         report = collect_classifications.out.result
         microbial_sam = minimap2_microbial.out.sam_ch
         host_sam = minimap2_host.out
-        blast = blast_ch
+        blast_queries = query_ch
+        // samples with no microbial reads have no queries
+        no_reads = minimap2_microbial.out.no_reads
 }
