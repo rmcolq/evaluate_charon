@@ -36,9 +36,12 @@ scripts/compare_param_sweeps.py --sweep sim_ont=sim/param_sweep real_ont=real/pa
 `--ref_bed` (default `resources/T2T_ref.bed`) gives the chromosome lengths. The human mitochondrion is the contig
 `JAGYVL020000058.1` in the default references and is plotted as chrM.
 
-## Annotation files (not in the repository)
+## Annotation files (downloaded on first use)
 
-`plot_leak_ideogram.py` reads these from `resources/annotations/`. All come from the UCSC hub for T2T-CHM13v2.0,
+`plot_leak_ideogram.py` reads these from `--annotations` (default `resources/annotations/`). Any that are missing are
+downloaded there the first time it runs (about 215 MB) and checked against the md5 checksums UCSC publishes in the hub's
+`md5sum.txt`; a file whose checksum does not match is not kept. With `--no_download` it uses only the files already
+there and skips the tracks whose files are missing (`GCA_009914755.4.chromAlias.txt` is always needed). All come from the UCSC hub for T2T-CHM13v2.0,
 `https://hgdownload.soe.ucsc.edu/hubs/GCA/009/914/755/GCA_009914755.4/`:
 
 | File | Path under the hub URL |
