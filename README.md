@@ -13,6 +13,14 @@ conda activate evaluate_charon
 The pipeline's own processes run in containers, so Docker (`-profile docker`) is needed as well. The environment has not
 been solved on every platform: if a package fails to resolve, relax its version in the file.
 
+## Human samples
+
+The human read sets are listed in `manifests/` (`human_nanopore.csv`, `human_nanopore_mini.csv`,
+`human_illumina_paired.csv`). They are HPRC release 2 samples chosen so that none of their assemblies is in the Charon
+index: the indexes are built from the [charon-index-build](https://github.com/rmcolq/charon-index-build) manifests
+(`manifests/<profile>/human_assemblies.tsv`), which leave these samples out. Reads from a sample whose assembly is in the
+index would test recall of sequence the index already holds, not of unseen human genomes.
+
 ## Paired reads (Illumina)
 
 Add `--paired true` and give paired input, one of:
