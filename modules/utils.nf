@@ -423,7 +423,7 @@ process blastn_microbial_host_hits {
     script:
     out_name = "results_${fasta_file.baseName}.txt"
     remote = !params.blast_db
-    dbopts = remote ? "-db nt -remote" : "-db ${blast_db}/nt -num_threads 4"
+    dbopts = remote ? "-db nt -remote" : "-db ${blast_db}/nt -num_threads ${task.cpus} -mt_mode 1"
     cache = params.blast_cache ? "${blast_cache_root()}/${unique_id}" : "\$PWD/blast_cache"
     outfmt = '"6 qseqid sacc sscinames staxids sstart send evalue pident length bitscore qcovs"'
     // Best hit is chosen by bitscore downstream, so keep enough targets that human hits do not crowd out the rest.

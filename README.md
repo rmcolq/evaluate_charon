@@ -71,7 +71,9 @@ excluded.
 
 BLAST searches the reads which were called microbial and map to the human reference. With `--blast_db` (a directory holding
 `nt` and the taxonomy files) the search is local. Without it the search is remote, against NCBI, which is slow and
-rate limited, so the pipeline keeps requests small and tolerant of failures:
+rate limited, so the pipeline keeps requests small and tolerant of failures (for a local search, use much larger chunks, e.g.
+`--blast_chunk_reads 2000`: each search reads the whole database, so small chunks repeat that many times; each
+local task uses `--blast_threads` threads, default 16):
 
 - reads are sent in chunks of `--blast_chunk_reads` (default 20), one chunk at a time for a remote search;
 - each search is tried up to five times with a growing wait. A remote search is abandoned after `--blast_remote_timeout` (default `20m`)

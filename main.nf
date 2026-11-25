@@ -29,6 +29,7 @@ params {
     max_concurrent_samples: Integer
     slot_timeout: Integer
     blast_max_targets: Integer
+    blast_threads: Integer
     blast_chunk_reads: Integer
     blast_max_reads: Integer?
     blast_min_cov: Float
