@@ -9,8 +9,9 @@ def charon_memory(db, attempt) {
     return new nextflow.util.MemoryUnit((db.size() * 1.5) as long + 8.GB.toBytes()) * attempt
 }
 
-// name labels the comparator (charon or charon_host_only) in all outputs. microbial_category is the extracted
-// category holding the reads to keep: "microbial" for a normal index, "non_host" for a host-only index.
+// name labels the comparator (charon or charon_host_only) in all outputs. Charon's own defaults apply (for single-end
+// or paired reads) unless --charon_args sets its options, e.g. --charon_args "--confidence 10". microbial_category is
+// the extracted category holding the reads to keep: "microbial" for a normal index, "non_host" for a host-only index.
 process run_charon {
 
     label "process_medium_plus_mem"
@@ -39,48 +40,13 @@ process run_charon {
     """
     charon dehost ${fastq} \
       --db ${db} \
-      --confidence 7 \
+      ${params.charon_args} \
       --log charon_${unique_id}.log \
       --extract all \
       --prefix ${reads_prefix(unique_id, fastq)} \
       -t ${task.cpus} \
       --max-memory ${(task.memory.toGiga() * 0.8) as int} \
       > ${unique_id}_${name}.out
-
-    """
-}
-
-process run_charon_chunk {
-
-    label "process_medium_plus_mem"
-    label "process_long"
-    memory { charon_memory(db, task.attempt) }
-    container params.charon_container
-    maxForks 4
-
-    publishDir path: { "${params.outdir}/${unique_id}/" }, mode: 'copy', pattern: "*.out"
-
-
-    input:
-    tuple val(unique_id), path(fastq)
-    path(db)
-
-    output:
-    tuple val(unique_id), path("${fastq.baseName}_microbial.f*q.gz"), emit: microbial_fastq
-    tuple val(unique_id), path("${fastq.baseName}_human.f*q.gz"), emit: human_fastq
-    tuple val(unique_id), path("${unique_id}_charon.out"),  emit: result
-
-    script:
-    """
-    charon dehost ${fastq} \
-      --db ${db} \
-      --confidence 7 \
-      --log charon_${unique_id}.log \
-      --extract all \
-      --prefix ${fastq.baseName} \
-      -t ${task.cpus} \
-      --max-memory ${(task.memory.toGiga() * 0.8) as int} \
-      > ${unique_id}_charon.out
 
     """
 }
@@ -111,68 +77,6 @@ process extract_unclassified_reads {
     awk -F'\t' '\$1 == "U" {print \$2}' ${report} | sed 's#/[12]\$##' > ids.txt
     ${extract.join("\n    ")}
     """
-}
-
-process cat_all_microbial_files {
-
-    label "process_low"
-    container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
-
-    input:
-    tuple val(unique_id), path(fastq_files)
-
-    output:
-    tuple val(unique_id), val("charon"), path("charon_${unique_id}_microbial.fq.gz")
-
-    script:
-    """
-    cat \$(ls *.f*q*) > combined.tmp
-    mv combined.tmp "charon_${unique_id}_microbial.fq.gz"
-    """
-}
-
-process cat_all_human_files {
-
-    label "process_low"
-    container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
-
-    input:
-    tuple val(unique_id), path(fastq_files)
-
-    output:
-    tuple val(unique_id), val("charon"), path("charon_${unique_id}_human.fq.gz")
-
-    script:
-    """
-    cat \$(ls *.f*q*) > combined.tmp
-    mv combined.tmp "charon_${unique_id}_human.fq.gz"
-    """
-}
-
-workflow run_charon_in_chunks {
-    take:
-    fastq_ch
-    db
-
-    main:
-    fastq_ch.map{unique_id, fastq -> [unique_id, fastq.splitFastq(by: params.charon_chunk_size, file:true, compress:true)]}
-            .transpose()
-            .set{chunked_fastq_ch}
-
-    run_charon_chunk(chunked_fastq_ch, db)
-    
-    run_charon_chunk.out.microbial_fastq.groupTuple() | cat_all_microbial_files | set{ microbial_fastq }
-
-    run_charon_chunk.out.human_fastq.groupTuple() | cat_all_human_files | set{ human_fastq }
-
-    run_charon_chunk.out.result.collectFile{ unique_id, result -> ["${unique_id}.charon.out", result.text]}
-                                      .map { f -> [f.simpleName, "charon", f] }
-                                      .set{ result }
-    
-    emit:
-    microbial_fastq
-    human_fastq
-    result
 }
 
 // Run once per charon index: name labels the comparator in all outputs, and db is the index for it.
@@ -207,7 +111,7 @@ workflow evaluate_charon {
         extract_blast_queries(minimap2_microbial.out.chunk_sam_ch)
         query_ch = extract_blast_queries.out.queries
     } else {
-        query_ch = Channel.empty()
+        query_ch = channel.empty()
     }
 
 

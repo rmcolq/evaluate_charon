@@ -42,8 +42,8 @@ workflow evaluate_dehosting {
     fastq_ch
 
     main:
-    query_ch = Channel.empty()
-    done_ch = Channel.empty()
+    query_ch = channel.empty()
+    done_ch = channel.empty()
 
     // the minimap2 index of the reference, built once (or found in the store dir) for every method
     mapping_index()
@@ -91,10 +91,10 @@ workflow evaluate_dehosting {
         blast(query_ch)
         blast_results = blast.out.results
     } else {
-        blast_results = Channel.empty()
+        blast_results = channel.empty()
     }
 
-    eval_ch = Channel.empty()
+    eval_ch = channel.empty()
     if (params.charon)
         eval_ch = eval_ch.mix(build_eval_ch(evaluate_charon.out, "charon", blast_results))
     if (params.charon_host_only)

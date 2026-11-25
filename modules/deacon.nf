@@ -71,18 +71,10 @@ process collect_classifications {
 
     script:
     """
-    # one id per read, or per pair (taken from R1)
-    cat ${first_file(host_fastq)}  | gunzip | awk 'NR%4==1 {print substr(\$1,2)}' | sed 's#/[12]\$##' > list_host
-    cat ${first_file(microbial_fastq)}  | gunzip | awk 'NR%4==1 {print substr(\$1,2)}' | sed 's#/[12]\$##' > list_microbial
+    # one line per read, or per pair (the id taken from R1, without /1 or /2)
     echo -e "read_id\tclassification" > "${unique_id}.${name}.out"
-    for id in \$(cat list_microbial)
-      do
-        echo -e "\$id\tmicrobial"
-      done >> "${unique_id}.${name}.out"
-    for id in \$(cat list_host)
-      do
-        echo -e "\$id\thuman"
-      done >> "${unique_id}.${name}.out"
+    zcat -f ${first_file(microbial_fastq)} | awk 'NR%4==1 {id=substr(\$1,2); sub(/\\/[12]\$/, "", id); print id "\tmicrobial"}' >> "${unique_id}.${name}.out"
+    zcat -f ${first_file(host_fastq)} | awk 'NR%4==1 {id=substr(\$1,2); sub(/\\/[12]\$/, "", id); print id "\thuman"}' >> "${unique_id}.${name}.out"
     """
 }
 
@@ -112,7 +104,7 @@ workflow evaluate_deacon {
         extract_blast_queries(minimap2_microbial.out.chunk_sam_ch)
         query_ch = extract_blast_queries.out.queries
     } else {
-        query_ch = Channel.empty()
+        query_ch = channel.empty()
     }
 
     emit:

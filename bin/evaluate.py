@@ -256,6 +256,31 @@ def load_blast_info(blast_results):
     return df
 
 
+def collapse_mates(blast_df, min_blast_cov, min_blast_pident, bitscore_ratio):
+    """Both mates of a pair are searched, as read_id/1 and read_id/2. Keep one row per pair: the mate which is most
+    clearly human by the leak tier tests (human-specific, then a good human hit, then any human hit, then the higher
+    human bitscore), and a searched mate over one whose search failed. The pair counts as failed only if every mate
+    failed. Single-end reads have one row each and are unchanged."""
+    if blast_df.empty:
+        return blast_df
+    df = blast_df.copy()
+    df["pair_id"] = df["read_id"].astype(str).str.replace(r"/[12]$", "", regex=True)
+    if df["pair_id"].is_unique and (df["pair_id"] == df["read_id"]).all():
+        return blast_df
+    human = df["blast_human"].fillna(False).astype(bool)
+    good = human & (df["human_qcov"] >= min_blast_cov) & (df["human_pident"] >= min_blast_pident)
+    specific = good & (df["nonhuman_bitscore"].isna() | (df["human_bitscore"] >= bitscore_ratio * df["nonhuman_bitscore"]))
+    df["_searched"] = ~df["blast_failed"].fillna(False).astype(bool)
+    df["_specific"], df["_good"], df["_human"] = specific, good, human
+    df["_bitscore"] = df["human_bitscore"].fillna(-1)
+    all_failed = ~df.groupby("pair_id")["_searched"].transform("any")
+    df["blast_failed"] = all_failed
+    df = df.sort_values(["_searched", "_specific", "_good", "_human", "_bitscore"], ascending=False, kind="stable")
+    df = df.drop_duplicates("pair_id", keep="first")
+    df["read_id"] = df["pair_id"]
+    return df[blast_df.columns].reset_index(drop=True)
+
+
 def load_both_sam(host_sam, microbial_sam):
     host_df = load_map_info_from_sam(host_sam)
     #host_df["sam"] = "host"
@@ -276,29 +301,29 @@ def load_sampled_ids(path):
     sys.stderr.write("Host reads sampled for mapping: " + str(len(ids)) + "\n")
     return ids if ids else None
 
+CHARON_COLUMNS = ["status", "read_id", "classification", "length", "num_hashes", "mean_quality", "confidence", "compression"]
+
 def load_charon_output(path, classifier="charon"):
     sys.stderr.write("LOAD CHARON OUTPUT from " + path + "\n")
-    df = pd.read_csv(path, sep="\t", index_col=False, header=None)
-    entries = []
-    for  i, row in df.iterrows():
-        entry = {"status":row[0], "read_id":row[1], "classification": row[2], "length": row[3], "num_hashes":row[4],   "mean_quality": row[5], "confidence": row[6], "compression":row[7]}
-        try:
-            details = row[8].split(" ")
-        except AttributeError:
-            # no per-category details for this read (NaN), so do not reuse the previous read's
-            sys.stderr.write(f"No category details for read {row[1]}\n")
-            details = []
-        for part in details:
-            try:
-                category, num_hits, prop_hits, prop_unique_hits, prob = part.split(":")
-            except:
-                continue
-            entry[f"p_{category}"] = float(prob)
-            entry[f"{category}_num_hits"] = int(num_hits)
-            entry[f"{category}_prop"] = float(prop_hits)
-            entry[f"{category}_unique_prop"] = float(prop_unique_hits)
-        entries.append(entry)
-    df =  pd.DataFrame(entries)
+    # one row per read; the last column holds "category:num_hits:prop_hits:prop_unique_hits:probability" for each
+    # category, separated by spaces (empty for reads which were not classified)
+    raw = pd.read_csv(path, sep="\t", index_col=False, header=None, dtype={1: str})
+    df = raw.iloc[:, :len(CHARON_COLUMNS)].copy()
+    df.columns = CHARON_COLUMNS
+    details = raw[len(CHARON_COLUMNS)] if raw.shape[1] > len(CHARON_COLUMNS) else pd.Series("", index=raw.index)
+    parts = details.fillna("").astype(str).str.split(" ").explode()
+    parts = parts[parts.str.count(":") == 4]
+    if not parts.empty:
+        fields = parts.str.split(":", expand=True)
+        fields.columns = ["category", "num_hits", "prop", "unique_prop", "prob"]
+        categories = list(dict.fromkeys(fields["category"]))
+        wide = fields.set_index("category", append=True).unstack("category")
+        for category in categories:
+            df[f"p_{category}"] = wide[("prob", category)].astype(float)
+            num_hits = wide[("num_hits", category)]
+            df[f"{category}_num_hits"] = num_hits.astype(int) if num_hits.notna().all() else num_hits.astype(float)
+            df[f"{category}_prop"] = wide[("prop", category)].astype(float)
+            df[f"{category}_unique_prop"] = wide[("unique_prop", category)].astype(float)
     # Reads removed before classification (too short, or too low quality) have status F. They are in the table so
     # that every input read is accounted for, but they were never classified and have no compression, so keep them
     # out of the host/microbial/unclassified counts and of the distributions the other reads are compared to.
@@ -685,7 +710,8 @@ def main():
         mapped_df = load_both_sam(args.host_sam, args.microbial_sam)
         mapped_df.to_csv("mapped_df.csv")
 
-        blast_df = load_blast_info(args.blast_result)
+        blast_df = collapse_mates(load_blast_info(args.blast_result), args.min_blast_cov, args.min_blast_pident,
+                                  args.bitscore_ratio)
         blast_df.to_csv("blast_df.csv")
 
         combined_df = mapped_df.merge(blast_df, how="left", on="read_id")

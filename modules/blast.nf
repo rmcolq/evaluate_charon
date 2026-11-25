@@ -86,7 +86,7 @@ process blastn_chunk {
     label "process_long"
     tag "${chunk.baseName}"
     conda "bioconda::blast=2.16.0"
-    container "ncbi/blast"
+    container "ncbi/blast:2.16.0"
     maxForks params.blast_db ? 4 : 1
 
     input:

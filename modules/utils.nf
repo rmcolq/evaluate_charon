@@ -55,20 +55,28 @@ process bam_to_fastq {
     path(cram_ref)
 
     output:
-    tuple val(unique_id), path(params.paired ? "${unique_id}_R*.fastq.gz" : "${bam.baseName}.fastq")
+    tuple val(unique_id), path(params.paired ? "${unique_id}_R*.fastq.gz" : "${bam.baseName}.fastq.gz")
 
     script:
-    def ref = cram_ref.name == "NO_FILE" ? "" : "-T ${cram_ref}"
+    def ref = cram_ref.name == "NO_FILE" ? "" : "--reference ${cram_ref}"
     if (params.paired) {
         """
         # primary alignments only, grouped by read name so that mates are adjacent
         samtools view -u ${ref} -F 0x900 ${bam} \
-          | samtools collate -O -u - \
+          | samtools collate -O -u - collate_tmp \
           | samtools fastq -n -1 "${unique_id}_R1.fastq.gz" -2 "${unique_id}_R2.fastq.gz" -0 /dev/null -s /dev/null -
         """
     } else {
         """
-        samtools fastq ${ref} ${bam} > "${bam.baseName}.fastq"
+        # A coordinate-sorted file is first grouped by read name, which puts the reads in an order unrelated to their
+        # position: host evaluation maps the first reads, which would otherwise all come from the start of chr1.
+        # samtools fastq leaves out secondary and supplementary alignments.
+        sorted=\$(samtools view -H ${ref} ${bam} | grep -c "SO:coordinate" || true)
+        if [ "\$sorted" -gt 0 ]; then
+          samtools collate -O -u -@ ${task.cpus} ${ref} ${bam} collate_tmp | samtools fastq -
+        else
+          samtools fastq ${ref} ${bam}
+        fi | bgzip -@ ${task.cpus} > "${bam.baseName}.fastq.gz"
         """
     }
 }
@@ -127,7 +135,7 @@ workflow mapping_index {
         minimap2_index(refs, index_name)
         index_ch = minimap2_index.out
     } else {
-        index_ch = Channel.value(file("${projectDir}/assets/NO_FILE", checkIfExists: true))
+        index_ch = channel.value(file("${projectDir}/assets/NO_FILE", checkIfExists: true))
     }
 
     emit:
@@ -257,7 +265,7 @@ process minimap2_host {
 
 process extract_microbial_host_hits {
 
-    label "process_medium"
+    label "process_single"
     tag "${unique_id}"
     conda "bioconda::samtools=1.21"
     container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
@@ -272,11 +280,10 @@ process extract_microbial_host_hits {
 
     script:
     """
-    samtools view -S -b ${sam_file} | samtools sort - -o ${sam_file.baseName}.sorted.bam
-    samtools index ${sam_file.baseName}.sorted.bam
-    samtools view -L ${ref_bed} ${sam_file.baseName}.sorted.bam -b -o out.bam
-    # -n keeps the read name as it is (no /1 /2), so BLAST hits match the classifier's read ids
-    samtools fasta -n out.bam > "${unique_id}.${method}.${sam_file.baseName}.query.fasta"
+    # -L streams through the alignments, keeping those overlapping the human reference, so no sorting or index is needed.
+    # Both mates of a pair are kept, named /1 and /2 (single-end reads keep their name); evaluate.py takes the more
+    # human mate for the pair.
+    samtools view -u -L ${ref_bed} ${sam_file} | samtools fasta - > "${unique_id}.${method}.${sam_file.baseName}.query.fasta"
     """
 }
 
