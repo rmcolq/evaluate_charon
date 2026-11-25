@@ -84,10 +84,12 @@ def main():
             for read_id, seq in group.items():
                 out.write(f">{read_id}\n{seq}\n")
         ids = list(group)
-        if args.max_reads and len(ids) > args.max_reads:
+        # the mates of a pair (/1 and /2) are kept or dropped together, and count as one read
+        pairs = list(dict.fromkeys(re.sub(r"/[12]$", "", read_id) for read_id in ids))
+        if args.max_reads and len(pairs) > args.max_reads:
             # a fixed random sample: the same reads every run, so cached results are reused
-            keep = set(random.Random(f"{sample}\t{method}").sample(ids, args.max_reads))
-            ids = [read_id for read_id in ids if read_id in keep]
+            keep = set(random.Random(f"{sample}\t{method}").sample(pairs, args.max_reads))
+            ids = [read_id for read_id in ids if re.sub(r"/[12]$", "", read_id) in keep]
         selected[(sample, method)] = ids
 
     with open("groups.tsv", "w") as out:

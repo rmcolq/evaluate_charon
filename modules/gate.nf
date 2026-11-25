@@ -1,14 +1,9 @@
 #!/usr/bin/env nextflow
 
 /*
- * Limits how many samples are in flight at once so that large inputs do not fill the disk.
- *
- * A "slot" is a directory <slot_dir>/<unique_id>. acquire_slot only lets a sample through when
- * fewer than params.max_concurrent_samples slots exist. The slot is removed by release_slot once
- * every enabled method has classified and mapped the sample, or by the errorStrategy in conf/base.config when a
- * task for that sample fails for good. Slots older than params.slot_timeout minutes are reclaimed
- * as a safety net (e.g. after a killed run). Runs on the host (no container) so that slot_dir is
- * shared with the Nextflow head process.
+ * Limits how many samples are in flight at once, so that large inputs do not fill the disk. A slot is a directory
+ * <slot_dir>/<unique_id>, removed by release_slot, or by the errorStrategy in conf/base.config when a sample fails.
+ * Slots older than --slot_timeout minutes are reclaimed (e.g. after a killed run).
  */
 
 process acquire_slot {
@@ -54,14 +49,12 @@ process release_slot {
     """
 }
 
-// [id, path] -> [id, path], emitted only as slots become free. Remote paths are not
-// staged here: the source is passed as a string and re-wrapped as a path afterwards.
+// Remote paths pass as strings, so they are not staged while a sample waits
 workflow throttle_samples {
     take:
     sample_ch
 
     main:
-    // a sample's reads are one file, or a list of two for paired reads
     sample_ch.map{ id, f -> [id, f instanceof List ? f.collect{ it.toUriString() } : f.toUriString()] }
              .set{ source_ch }
     acquire_slot(source_ch)
@@ -72,8 +65,6 @@ workflow throttle_samples {
     gated_ch
 }
 
-// Takes [id, classifier] "done" events and frees the sample's slot once all enabled
-// methods have reported.
 workflow release_finished_samples {
     take:
     done_ch

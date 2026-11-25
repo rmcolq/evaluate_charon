@@ -1,25 +1,13 @@
 #!/usr/bin/env nextflow
 
 /*
- * BLAST any number of FASTA files (plain or gzipped) in one pooled search.
- *
- * Input: [sample, label, fasta]. A sample and label may come with several files; the label is, for example, the
- * method whose reads these are. Output: [sample, label, results] for every sample and label given, where results is
- * <outdir>/<sample>/blast/<sample>.<label>.results_blastn.txt, one line per hit: "all" or "nonhuman" (the search it
- * came from), then the BLAST columns (qseqid sacc sscinames staxids sstart send evalue pident length bitscore
- * qcovs). A read whose search failed is written as "failed<TAB>read_id".
- *
- * Each search reads the whole database, so the time is set by the number of searches, not the number of reads: the
- * reads of all files are searched together, once all of them are ready. A read is searched once per sample, however
- * many labels it has, and not at all if its result is in the cache (<store_dir>/blast_cache/<sample>).
- *
- * Database (--blast_db): a BLAST database given by its path without extensions (e.g. /db/blast/core_nt), or a
- * directory holding one called nt. The taxonomy files (taxdb.bti, taxdb.btd, taxonomy4blast.sqlite3) must be in the
- * same directory. Without --blast_db the search is remote, against NCBI's nt.
+ * BLAST any number of FASTA files in one pooled search: [sample, label, fasta] in, [sample, label, results] out.
+ * Each search reads the whole database, so the time is set by the number of searches, not of reads: all files are
+ * pooled, and a read is searched once per sample and cached (<store_dir>/blast_cache/<sample>).
+ * Result lines are "all" or "nonhuman" (the search) then the BLAST columns, or "failed<TAB>read_id".
  */
 
-// The cache is outside the task directory, so it is mounted into the containers that use it; it is created first
-// so that docker does not create it as root.
+// The cache is outside the task directory, so containers need it mounted (created first, or docker creates it as root)
 def blast_cache_root() {
     return file(params.store_dir).toAbsolutePath().normalize().toString() + "/blast_cache"
 }
@@ -37,19 +25,15 @@ def blast_db_parts() {
     return db.isDirectory() ? [db, "nt"] : [db.parent, db.name]
 }
 
-// Reads per search: small for a remote search, so NCBI is not sent one huge request; large for a local one.
+// small for a remote search, so NCBI is not sent one huge request
 def blast_chunk_reads() {
     return params.blast_chunk_reads ?: (params.blast_db ? 5000 : 20)
 }
 
-// Pool the reads of all files (bin/pool_blast_queries.py): unique per sample, skipping reads in the cache, capped at
-// --blast_max_reads per sample and label (a random sample, the same every run). The reads of each sample and label,
-// before any cap, are published as <outdir>/<sample>/<sample>_<label>_blast_queries.fasta.gz.
 process pool_blast_queries {
 
     label "process_single"
     tag "all samples"
-    conda "conda-forge::python=3.11"
     container 'community.wave.seqera.io/library/simplesam_numpy_pandas_pip_taxoniq:3af1649bdaf86fca'
     containerOptions { blast_cache_mount() }
     publishDir path: { params.outdir }, mode: 'copy', pattern: "published/**", saveAs: { fn -> fn.replaceFirst(/^published\//, '') }
@@ -74,19 +58,14 @@ END_OF_MANIFEST
     """
 }
 
-// BLAST one chunk of the pooled reads. A remote search can fail (connection errors, rate limits) or be slow, so the
-// searches are tried up to five times with a growing wait. Each remote search is abandoned after
-// --blast_remote_timeout times the attempt number (20m, 40m, 60m, ... by default), so a slow search gets longer on
-// later attempts, and a search which has finished is not repeated. If a search still fails, every read of the chunk
-// is written as "failed<TAB>q<N>"; the task itself does not fail, so the summaries are always produced.
-// A local search uses task.cpus threads, which split the database between them.
+// A remote search can fail or hang, so it is retried with a growing wait and timeout. A chunk that still fails is
+// written as "failed" lines rather than failing the task, so the summaries are always produced.
 process blastn_chunk {
 
     label "process_medium_plus_mem"
     label "process_long"
     tag "${chunk.baseName}"
-    conda "bioconda::blast=2.16.0"
-    container "ncbi/blast"
+    container "ncbi/blast:2.16.0"
     maxForks params.blast_db ? 4 : 1
 
     input:
@@ -102,9 +81,7 @@ process blastn_chunk {
     remote = !params.blast_db
     dbopts = remote ? "-db nt -remote" : "-db ${blast_db_dir}/${blast_db_name} -num_threads ${task.cpus}"
     outfmt = '"6 qseqid sacc sscinames staxids sstart send evalue pident length bitscore qcovs"'
-    // Best hit is chosen by bitscore downstream, so keep enough targets that human hits do not crowd out the rest.
-    // The second search excludes human (taxid 9606) to find the best non-human hit; every line is prefixed
-    // with the search it came from ("all" or "nonhuman").
+    // the second search excludes human (9606) to find the best non-human hit, for leak tier 4
     limit_secs = remote ? (params.blast_remote_timeout as nextflow.util.Duration).toSeconds() : 24 * 3600
     blast_args = "-query ${chunk} ${dbopts} -evalue 1e-6 -perc_identity 85 -max_target_seqs ${params.blast_max_targets} -outfmt ${outfmt}"
     search_all = "timeout \$((attempt * ${limit_secs})) blastn ${blast_args} -out all.tmp"
@@ -135,14 +112,10 @@ process blastn_chunk {
     """
 }
 
-// Give each sample and label its results (bin/split_blast_results.py), from this search or from the cache, and add
-// the new results to the cache. A read whose search failed, or whose chunk has no result (its task failed or was
-// killed), is written as "failed".
 process split_blast_results {
 
     label "process_single"
     tag "all samples"
-    conda "conda-forge::python=3.11"
     container 'community.wave.seqera.io/library/simplesam_numpy_pandas_pip_taxoniq:3af1649bdaf86fca'
     containerOptions { blast_cache_mount() }
     publishDir path: { params.outdir }, mode: 'copy', saveAs: { fn -> fn.replaceFirst(/^out\//, '') }
@@ -185,7 +158,6 @@ workflow blast {
         pool_blast_queries(pool_in.manifest, pool_in.files)
         blastn_chunk(pool_blast_queries.out.chunks.flatten(), db[0], db[1])
         split_blast_results(pool_blast_queries.out.tables, blastn_chunk.out.collect().ifEmpty([]))
-        // out/<sample>/blast/<sample>.<label>.results_blastn.txt
         split_blast_results.out
             .flatten()
             .map{ f ->

@@ -12,7 +12,8 @@ process download_deacon_index {
 
     script:
     """
-    export SSL_CERT_FILE=/opt/conda/ssl/cacert.pem
+    # the container has no system certificates
+    [ -f /opt/conda/ssl/cacert.pem ] && export SSL_CERT_FILE=/opt/conda/ssl/cacert.pem
     deacon index fetch ${params.deacon_index} -k 31 -w 15
     """
 }
@@ -35,22 +36,19 @@ process run_deacon {
     tuple val(unique_id), val(name), path("${deacon_out(name, unique_id, 'microbial', fastq)}"), path("${deacon_out(name, unique_id, 'human', fastq)}"),  emit: combined
 
     script:
-    // fastq is one file, or R1 and R2 of a pair (deacon counts a hit in either mate for the pair).
-    // extra_args are applied to both calls so that the human and microbial sets are exact complements
+    // extra_args go to both calls, so the human and microbial sets are exact complements
     """
     deacon filter ${extra_args} ${deacon_index} ${fastq} ${deacon_output_args(name, unique_id, 'human', fastq)}
     deacon filter -d ${extra_args} ${deacon_index} ${fastq} ${deacon_output_args(name, unique_id, 'microbial', fastq)}
     """
 }
 
-// deacon options naming the output file(s) of a category: -o, plus -O for the second mate of a pair
 def deacon_output_args(name, unique_id, category, reads) {
     return is_paired(reads) ?
         "-o ${name}_${unique_id}_${category}_1.fq.gz -O ${name}_${unique_id}_${category}_2.fq.gz" :
         "-o ${name}_${unique_id}_${category}.fq.gz"
 }
 
-// Output file(s) of a category: one file, or _1 and _2 for a pair
 def deacon_out(name, unique_id, category, reads) {
     return is_paired(reads) ? "${name}_${unique_id}_${category}_?.fq.gz" : "${name}_${unique_id}_${category}.fq.gz"
 }
@@ -71,23 +69,14 @@ process collect_classifications {
 
     script:
     """
-    # one id per read, or per pair (taken from R1)
-    cat ${first_file(host_fastq)}  | gunzip | awk 'NR%4==1 {print substr(\$1,2)}' | sed 's#/[12]\$##' > list_host
-    cat ${first_file(microbial_fastq)}  | gunzip | awk 'NR%4==1 {print substr(\$1,2)}' | sed 's#/[12]\$##' > list_microbial
+    # one line per read, or per pair (from R1)
     echo -e "read_id\tclassification" > "${unique_id}.${name}.out"
-    for id in \$(cat list_microbial)
-      do
-        echo -e "\$id\tmicrobial"
-      done >> "${unique_id}.${name}.out"
-    for id in \$(cat list_host)
-      do
-        echo -e "\$id\thuman"
-      done >> "${unique_id}.${name}.out"
+    zcat -f ${first_file(microbial_fastq)} | awk 'NR%4==1 {id=substr(\$1,2); sub(/\\/[12]\$/, "", id); print id "\tmicrobial"}' >> "${unique_id}.${name}.out"
+    zcat -f ${first_file(host_fastq)} | awk 'NR%4==1 {id=substr(\$1,2); sub(/\\/[12]\$/, "", id); print id "\thuman"}' >> "${unique_id}.${name}.out"
     """
 }
 
-// Run once per deacon setting: name labels the comparator (e.g. deacon, deacon_sensitive) in all outputs
-// and extra_args are added to the deacon filter calls.
+// Run once per deacon setting; name labels it in all outputs
 workflow evaluate_deacon {
     take:
         fastq_ch
@@ -106,13 +95,12 @@ workflow evaluate_deacon {
     minimap2_microbial(run_deacon.out.microbial_fastq, refs)
     minimap2_host(run_deacon.out.human_fastq, refs)
 
-    // BLAST is run once for all samples and methods (modules/blast.nf, called from modules/evaluate_dehosting.nf), so only the
-    // queries are extracted here
+    // BLAST runs once for all samples and methods, in evaluate_dehosting
     if ( params.evaluate_microbial ){
         extract_blast_queries(minimap2_microbial.out.chunk_sam_ch)
         query_ch = extract_blast_queries.out.queries
     } else {
-        query_ch = Channel.empty()
+        query_ch = channel.empty()
     }
 
     emit:
@@ -120,6 +108,5 @@ workflow evaluate_deacon {
         microbial_sam = minimap2_microbial.out.sam_ch
         host_sam = minimap2_host.out
         blast_queries = query_ch
-        // samples with no microbial reads have no queries
         no_reads = minimap2_microbial.out.no_reads
 }

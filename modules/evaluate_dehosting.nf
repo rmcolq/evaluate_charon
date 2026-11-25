@@ -3,13 +3,11 @@ include { evaluate_charon as evaluate_charon_host_only } from '../modules/charon
 include { evaluate_deacon; download_deacon_index } from '../modules/deacon'
 include { evaluate_deacon as evaluate_deacon_sensitive } from '../modules/deacon'
 include { evaluate_nohuman } from '../modules/nohuman'
-include { evaluate_summary; mapping_index } from '../modules/utils'
+include { evaluate_summary; mapping_index; resolve_path } from '../modules/utils'
 include { blast } from '../modules/blast'
 
-// Combine the pieces for one method into the tuple evaluate_summary expects:
-// [id, classifier, report, host_sam, host_sampled_ids, microbial_sam, blast_result]
-// blast_results holds [id, method, results] for all methods; a sample with no microbial reads, or a run without
-// BLAST, gets an empty placeholder (evaluate.py treats an empty file as no hits).
+// [id, classifier, report, host_sam, host_sampled_ids, microbial_sam, blast_result] for evaluate_summary. A sample
+// with no microbial reads, or a run without BLAST, gets an empty BLAST result.
 def build_eval_ch(method, name, blast_results) {
     def no_blast = file("${projectDir}/resources/NO_BLAST", checkIfExists: true)
     def eval_ch = method.report
@@ -27,9 +25,8 @@ def build_eval_ch(method, name, blast_results) {
     return eval_ch
 }
 
-// [id, classifier] once a method has classified and mapped a sample, i.e. is done with the sample's reads. The
-// sample's slot is freed on this, not on the summary, because the summary waits for the BLAST search of all samples
-// together, which can only start once every sample has been through the gate.
+// [id, classifier] once a method has classified and mapped a sample. Slots are freed on this, not on the summary,
+// which waits for the pooled BLAST of all samples and so for every sample to pass the gate.
 def reads_done(method) {
     return method.report
                 .combine(method.host_sam, by: 0)
@@ -42,28 +39,25 @@ workflow evaluate_dehosting {
     fastq_ch
 
     main:
-    query_ch = Channel.empty()
-    done_ch = Channel.empty()
+    query_ch = channel.empty()
+    done_ch = channel.empty()
 
-    // the minimap2 index of the reference, built once (or found in the store dir) for every method
     mapping_index()
     refs = mapping_index.out.index
 
     if (params.charon){
-      evaluate_charon(fastq_ch, file(params.db, type: "file", checkIfExists: true), "charon", "microbial", refs)
+      evaluate_charon(fastq_ch, file(resolve_path(params.db), type: "file", checkIfExists: true), "charon", "microbial", refs)
       query_ch = query_ch.mix(evaluate_charon.out.blast_queries)
       done_ch = done_ch.mix(reads_done(evaluate_charon.out))
     }
 
     if (params.charon_host_only){
-      // charon with an index of the host only, so reads are called host or not host; the not host reads are kept
-      evaluate_charon_host_only(fastq_ch, file(params.db_host_only, type: "file", checkIfExists: true), "charon_host_only", "non_host", refs)
+      evaluate_charon_host_only(fastq_ch, file(resolve_path(params.db_host_only), type: "file", checkIfExists: true), "charon_host_only", "non_host", refs)
       query_ch = query_ch.mix(evaluate_charon_host_only.out.blast_queries)
       done_ch = done_ch.mix(reads_done(evaluate_charon_host_only.out))
     }
 
     if (params.deacon || params.deacon_sensitive){
-      // both deacon settings use the same index, so download it once
       download_deacon_index()
     }
 
@@ -74,7 +68,7 @@ workflow evaluate_dehosting {
     }
 
     if (params.deacon_sensitive){
-      // high sensitivity host depletion: absolute threshold of 1 and no relative threshold
+      // deacon's high sensitivity settings
       evaluate_deacon_sensitive(fastq_ch, download_deacon_index.out, "deacon_sensitive", "-a 1 -r 0", refs)
       query_ch = query_ch.mix(evaluate_deacon_sensitive.out.blast_queries)
       done_ch = done_ch.mix(reads_done(evaluate_deacon_sensitive.out))
@@ -86,15 +80,14 @@ workflow evaluate_dehosting {
       done_ch = done_ch.mix(reads_done(evaluate_nohuman.out))
     }
 
-    // one BLAST search for the reads of every sample and method
     if (params.evaluate_microbial) {
         blast(query_ch)
         blast_results = blast.out.results
     } else {
-        blast_results = Channel.empty()
+        blast_results = channel.empty()
     }
 
-    eval_ch = Channel.empty()
+    eval_ch = channel.empty()
     if (params.charon)
         eval_ch = eval_ch.mix(build_eval_ch(evaluate_charon.out, "charon", blast_results))
     if (params.charon_host_only)

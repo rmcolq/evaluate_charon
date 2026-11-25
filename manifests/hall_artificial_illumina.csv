@@ -1,0 +1,2 @@
+sample_id,fastq_1,fastq_2
+artificial_illumina,https://zenodo.org/records/ZENODO_RECORD_PENDING/files/all_1.illumina.shuffled.fq.gz,https://zenodo.org/records/ZENODO_RECORD_PENDING/files/all_2.illumina.shuffled.fq.gz
