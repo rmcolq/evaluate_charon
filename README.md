@@ -13,7 +13,6 @@ reference to find mistakes, and confirms human reads left among the microbial ca
    conda env create -f environment.yml
    conda activate evaluate_charon
    ```
-
    With `-profile conda` the pipeline's processes use this environment too, except Charon, which needs a container.
 
 2. **Reference.** `--refs` is the human (T2T) + EBV + fungi + Mycoplasma reference used for mapping, with `--ref_bed`
