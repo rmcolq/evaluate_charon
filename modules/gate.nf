@@ -5,7 +5,7 @@
  *
  * A "slot" is a directory <slot_dir>/<unique_id>. acquire_slot only lets a sample through when
  * fewer than params.max_concurrent_samples slots exist. The slot is removed by release_slot once
- * every enabled method has finished the sample, or by fail_sample() in conf/base.config when a
+ * every enabled method has classified and mapped the sample, or by the errorStrategy in conf/base.config when a
  * task for that sample fails for good. Slots older than params.slot_timeout minutes are reclaimed
  * as a safety net (e.g. after a killed run). Runs on the host (no container) so that slot_dir is
  * shared with the Nextflow head process.

@@ -30,7 +30,7 @@ params {
     slot_timeout: Integer
     blast_max_targets: Integer
     blast_threads: Integer
-    blast_chunk_reads: Integer
+    blast_chunk_reads: Integer?
     blast_max_reads: Integer?
     blast_min_cov: Float
     blast_min_pident: Float
@@ -121,7 +121,8 @@ workflow {
         exit 1, "Please either provide a CSV with --bam_csv (specifying sample_id,filepath), a CSV of FASTQ pairs with --fastq_pairs_csv (sample_id,fastq_1,fastq_2), a directory of fastq with --fastq_dir (each file for sample) or --fastq (and --fastq2), with --unique_id to name the sample"
     }
 
-    // free each sample's slot once every enabled method has finished with it
+    // free each sample's slot once every enabled method has classified and mapped it (BLAST and the summaries come
+    // later, for all samples together)
     n_methods = [params.charon, params.charon_host_only, params.deacon, params.deacon_sensitive, params.nohuman].count{ it }
     release_finished_samples(done_ch, n_methods)
 
