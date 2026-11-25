@@ -1,52 +1,65 @@
 #!/usr/bin/env nextflow
 
-// A path given as a parameter: absolute, or relative to the pipeline directory.
+// A path parameter: relative to the launch directory, else to the pipeline (resources/). A URL is downloaded once into
+// <store_dir>/downloads.
 def resolve_path(String path) {
-    // test the text, not file(path), which would already resolve a relative path against the launch directory
-    return (path.startsWith('/') || path.contains('://')) ? file(path) : file("${projectDir}/${path}")
+    if (path.contains('://')) {
+        def name = path.replaceAll(/\?.*$/, '').replaceAll(/\/content$/, '').tokenize('/').last()
+        def dest = file("${params.store_dir}/downloads/${path.md5().take(8)}/${name}")
+        if (!dest.exists()) {
+            log.info "Downloading ${path} to ${dest}"
+            def tmp = file("${dest}.part")
+            tmp.parent.mkdirs()
+            file(path).copyTo(tmp)
+            tmp.moveTo(dest)
+        }
+        return dest
+    }
+    def local = file(path)
+    return (path.startsWith('/') || local.exists()) ? local : file("${projectDir}/${path}")
 }
 
-// Paired input: FASTQ pairs are paired by their shape; a BAM/CRAM only when --paired says so.
+// All rows must be single-end or all paired: a run maps with one minimap2 preset
+def csv_rows() {
+    def rows = file(params.fastq_csv, checkIfExists: true).splitCsv(header: true, quote: '"')
+    def paired = rows.collect{ row -> row.fastq_2 ? true : false }.unique()
+    if (paired.size() > 1)
+        error "--fastq_csv mixes single-end and paired samples: run them separately"
+    return rows
+}
+
 def paired_input() {
-    return params.paired || params.fastq2 || params.fastq_pairs_csv
+    return params.paired || params.fastq2 || (params.fastq_csv && csv_rows().any{ row -> row.fastq_2 })
 }
 
 def minimap2_preset() {
     return (paired_input() || params.read_type == "illumina") ? "sr" : "map-ont"
 }
 
-// Reads travel through the pipeline as one channel item: a single file, or a list of two files (R1, R2)
-// for paired reads. Each process works out which it has from the shape of its input.
+// Reads travel as one file, or a list of two (R1, R2) for a pair
 def is_paired(reads) {
     return reads instanceof List
 }
 
-// Prefix of charon's output files: the sample for a pair, the file name for single-end reads
 def reads_prefix(unique_id, reads) {
     return is_paired(reads) ? "${unique_id}" : reads.baseName
 }
 
-// The first (or only) file of a set of reads
 def first_file(reads) {
     return is_paired(reads) ? reads[0] : reads
 }
 
-// Glob of the extracted reads files for a category: one file, or _1 and _2 for a pair
 def reads_glob(prefix, category, reads) {
     return is_paired(reads) ? "${prefix}_${category}_?.f*q.gz" : "${prefix}_${category}.f*q.gz"
 }
 
-// Name of the first (or only) reads file without its extensions
 def reads_name(reads) {
     return is_paired(reads) ? reads[0].baseName : reads.baseName
 }
 
 process bam_to_fastq {
-    // Reads from a BAM or CRAM. With --paired the file holds read pairs, which are written as R1/R2 FASTQ
-    // (reads without a mate are dropped). A CRAM needs its reference, --cram_ref.
     label "process_medium"
     tag "${unique_id}"
-    conda "bioconda::samtools=1.21"
     container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
     maxForks 2
 
@@ -68,9 +81,7 @@ process bam_to_fastq {
         """
     } else {
         """
-        # A coordinate-sorted file is first grouped by read name, which puts the reads in an order unrelated to their
-        # position: host evaluation maps the first reads, which would otherwise all come from the start of chr1.
-        # samtools fastq leaves out secondary and supplementary alignments.
+        # host evaluation and charon's model use the first reads, which in a sorted file all come from chr1
         sorted=\$(samtools view -H ${ref} ${bam} | grep -c "SO:coordinate" || true)
         if [ "\$sorted" -gt 0 ]; then
           samtools collate -O -u -@ ${task.cpus} ${ref} ${bam} collate_tmp | samtools fastq -
@@ -82,9 +93,7 @@ process bam_to_fastq {
 }
 
 process stage_fastq {
-    // Remote (e.g. s3://) inputs are downloaded by Nextflow into this task's work dir once,
-    // rather than separately by every classifier. Eager cleanup removes it after last use.
-    // Takes one file or a pair; a pair keeps its order (R1 then R2) because the names sort that way.
+    // downloads a remote input once, rather than once per classifier
     label "process_single"
     tag "${unique_id}"
     maxForks 2
@@ -101,14 +110,9 @@ process stage_fastq {
     """
 }
 
-// The minimap2 index of the reference is built once and kept in the store dir, so every mapping task loads it
-// instead of rebuilding it from the FASTA. Natively a human-sized index takes about 2 minutes and 3.5 GB, but in an
-// emulated or small-memory container (e.g. amd64 on Apple Silicon) it can be very slow or be killed, so on a laptop
-// build it natively and copy it to the path logged at the start of the run.
-// The size of the reference is in the name, so a changed reference is indexed again rather than using a stale index.
+// Built once into the store dir. The reference size is in the name, so a changed reference is indexed again.
 process minimap2_index {
     label "process_medium"
-    conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
     storeDir "${params.store_dir}/minimap2/"
     maxForks 1
@@ -125,7 +129,6 @@ process minimap2_index {
         """
 }
 
-// Indexes the reference once for all methods. Nothing is built when no mapping is evaluated.
 workflow mapping_index {
     main:
     if ( params.evaluate_host || params.evaluate_microbial ) {
@@ -147,7 +150,6 @@ process minimap2_microbial_chunk {
     label "process_medium"
     tag "${unique_id}"
 
-    conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
 
     input:
@@ -156,7 +158,6 @@ process minimap2_microbial_chunk {
     output:
         tuple val(unique_id), val(method), path("microbial.${reads_name(fastq)}.mmp.sam")
     script:
-        // fastq is one file, or R1 and R2 of a pair (mapped together, so each pair is mapped once)
         if ( params.evaluate_microbial ) {
             preset = minimap2_preset()
             """
@@ -170,8 +171,7 @@ process minimap2_microbial_chunk {
 
 }
 
-// Split a reads file, or a pair, into chunks of params.chunk_size reads. For a pair, R1 and R2 are split
-// the same way, so chunk i of each holds the same read pairs.
+// R1 and R2 are split the same way, so chunk i of each holds the same pairs
 def split_reads(reads) {
     if (!is_paired(reads))
         return reads.splitFastq(by: params.chunk_size, file: true)
@@ -188,19 +188,15 @@ workflow minimap2_microbial {
     main:
     def empty_sam = file("${projectDir}/resources/empty.sam", type: "file", checkIfExists: true)
 
-    // A sample with no microbial reads (e.g. a human sample) has no chunks, so nothing would reach the
-    // summary and the sample would never finish. Give it an empty result instead.
-    // Chunks are lists of one file, or of two files (R1, R2) with the same reads, for paired reads
+    // a sample with no microbial reads has no chunks, so it gets an empty result or it would never finish
     fastq_ch.map{unique_id, method, fastq -> [unique_id, method, split_reads(fastq)]}
             .branch{ unique_id, method, chunks ->
                 with_reads: chunks.size() > 0
                 no_reads: true
             }
             .set{ split_ch }
-    // Each chunk carries its sample's chunk count (groupKey) so that groupTuple can emit a sample as soon as
-    // its own chunks are done. Without it, groupTuple waits for the whole channel to close, which never
-    // happens while later samples are held back by the sample gate, so the sample never finishes.
-    // This workflow is called once per method, so grouping on the sample alone is enough.
+    // groupKey lets groupTuple emit a sample when its own chunks are done; waiting for the channel to close would
+    // deadlock with the sample gate
     split_ch.with_reads
         .map{ unique_id, method, chunks -> [groupKey(unique_id, chunks.size()), method, chunks] }
         .transpose()
@@ -229,7 +225,6 @@ process minimap2_host {
     label "process_medium"
     tag "${unique_id}"
 
-    conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
 
     publishDir path: { "${params.outdir}/${unique_id}/mapped/" }, mode: 'copy', pattern: "*.sam"
@@ -240,7 +235,6 @@ process minimap2_host {
     output:
         tuple val(unique_id), path("${unique_id}.${method}.host.sam"), path("${unique_id}.${method}.host_sampled.txt")
     script:
-        // fastq is one file, or R1 and R2 of a pair. host_eval_reads counts reads, or pairs for paired reads.
         if ( params.evaluate_host == true ) {
             preset = minimap2_preset()
             inputs = is_paired(fastq) ? "small_1.fq small_2.fq" : "small.fq"
@@ -252,7 +246,7 @@ process minimap2_host {
               zcat -f \$f | head -n ${params.host_eval_reads * 4} > small_\$i.fq || [ \$? -eq 141 ]
             done
             ${is_paired(fastq) ? "" : "mv small_1.fq small.fq"}
-            # the reads which are mapped, so that the others are not counted as unmapped
+            # the sampled reads, so that reads not sampled are not counted as unmapped
             awk 'NR%4==1 {print substr(\$1,2)}' ${is_paired(fastq) ? "small_1.fq" : "small.fq"} | sed 's#/[12]\$##' > "${unique_id}.${method}.host_sampled.txt"
             minimap2 -ax ${preset} ${refs} ${inputs} --secondary=no -N 1 -t ${task.cpus} --sam-hit-only > "${unique_id}.${method}.host.sam"
             """
@@ -267,7 +261,6 @@ process extract_microbial_host_hits {
 
     label "process_single"
     tag "${unique_id}"
-    conda "bioconda::samtools=1.21"
     container "community.wave.seqera.io/library/samtools:1.21--1929a413d00e1d7a"
 
     input:
@@ -275,26 +268,22 @@ process extract_microbial_host_hits {
     path ref_bed
 
     output:
-    // named for the sample, method and chunk, so the files of all of them can be staged together for pooling
+    // unique names, as the files of all samples and methods are staged together for BLAST
     tuple val(unique_id), val(method), path("${unique_id}.${method}.${sam_file.baseName}.query.fasta")
 
     script:
     """
-    # -L streams through the alignments, keeping those overlapping the human reference, so no sorting or index is needed.
-    # Both mates of a pair are kept, named /1 and /2 (single-end reads keep their name); evaluate.py takes the more
-    # human mate for the pair.
+    # both mates of a pair are kept, as /1 and /2; evaluate.py takes the more human one
     samtools view -u -L ${ref_bed} ${sam_file} | samtools fasta - > "${unique_id}.${method}.${sam_file.baseName}.query.fasta"
     """
 }
 
-// Map a set of reads which were not called by a method (e.g. the reads charon leaves unclassified) to the reference
-// in full, not a sample, and publish the alignments. Reads which do not map are not in the SAM.
+// Maps all the reads charon leaves unclassified, not a sample
 process minimap2_unclassified {
 
     label "process_medium"
     label "error_ignore"
     tag "${unique_id}"
-    conda "bioconda::minimap2=2.28"
     container "community.wave.seqera.io/library/minimap2:2.28--78db3d0b6e5cb797"
     publishDir path: { "${params.outdir}/${unique_id}/mapped/" }, mode: 'copy', pattern: "*.sam"
 
@@ -309,7 +298,6 @@ process minimap2_unclassified {
         """
 }
 
-// One row per mapped read, with the same alignment columns as the full tables
 process alignment_table {
 
     label "process_low"
@@ -328,8 +316,6 @@ process alignment_table {
         """
 }
 
-// Keep a set of reads (one file, or R1 and R2 of a pair) in <outdir>/<sample>/reads, named for the sample, method and
-// category. The reads are copied, because the originals are still needed by the next steps.
 process publish_reads {
 
     label "process_single"
@@ -379,7 +365,6 @@ process cat_all_microbial_sam_files {
 }
 
 
-// The reads of one method that were called microbial but map to the human reference, ready for BLAST
 workflow extract_blast_queries {
     take:
         chunk_sam_ch

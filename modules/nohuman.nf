@@ -33,21 +33,18 @@ process run_nohuman {
     tuple val(unique_id), path("${nohuman_out(unique_id, 'microbial', fastq)}"), path("${nohuman_out(unique_id, 'human', fastq)}"),  emit: combined
 
     script:
-    // fastq is one file, or R1 and R2 of a pair
     """
     nohuman --db ${nohuman_index} -t ${task.cpus} ${nohuman_output_args(unique_id, 'microbial', fastq)} ${fastq}
     nohuman --human --db ${nohuman_index} -t ${task.cpus} ${nohuman_output_args(unique_id, 'human', fastq)} ${fastq}
     """
 }
 
-// nohuman options naming the output file(s) of a category: -o, or --out1/--out2 for a pair
 def nohuman_output_args(unique_id, category, reads) {
     return is_paired(reads) ?
         "--out1 nohuman_${unique_id}_${category}_1.fq.gz --out2 nohuman_${unique_id}_${category}_2.fq.gz" :
         "-o nohuman_${unique_id}_${category}.fq.gz"
 }
 
-// Output file(s) of a category: one file, or _1 and _2 for a pair
 def nohuman_out(unique_id, category, reads) {
     return is_paired(reads) ? "nohuman_${unique_id}_${category}_?.fq.gz" : "nohuman_${unique_id}_${category}.fq.gz"
 }
@@ -68,7 +65,7 @@ process collect_classifications {
 
     script:
     """
-    # one line per read, or per pair (the id taken from R1, without /1 or /2)
+    # one line per read, or per pair (from R1)
     echo -e "read_id\tclassification" > "${unique_id}.nohuman.out"
     zcat -f ${first_file(microbial_fastq)} | awk 'NR%4==1 {id=substr(\$1,2); sub(/\\/[12]\$/, "", id); print id "\tmicrobial"}' >> "${unique_id}.nohuman.out"
     zcat -f ${first_file(host_fastq)} | awk 'NR%4==1 {id=substr(\$1,2); sub(/\\/[12]\$/, "", id); print id "\thuman"}' >> "${unique_id}.nohuman.out"
@@ -91,8 +88,7 @@ workflow evaluate_nohuman {
     minimap2_microbial(run_nohuman.out.microbial_fastq, refs)
     minimap2_host(run_nohuman.out.human_fastq, refs)
 
-    // BLAST is run once for all samples and methods (modules/blast.nf, called from modules/evaluate_dehosting.nf), so only the
-    // queries are extracted here
+    // BLAST runs once for all samples and methods, in evaluate_dehosting
     if ( params.evaluate_microbial ){
         extract_blast_queries(minimap2_microbial.out.chunk_sam_ch)
         query_ch = extract_blast_queries.out.queries
@@ -105,6 +101,5 @@ workflow evaluate_nohuman {
         microbial_sam = minimap2_microbial.out.sam_ch
         host_sam = minimap2_host.out
         blast_queries = query_ch
-        // samples with no microbial reads have no queries
         no_reads = minimap2_microbial.out.no_reads
 }

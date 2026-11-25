@@ -1,10 +1,12 @@
 # Analysis scripts
 
-Run these after the pipeline, on its `--outdir`. They need Python with `pandas`, `numpy`, `matplotlib`, `scipy` and
-`duckdb` (the `dehumanize` conda env has them). Pool one read type per run (nanopore or illumina).
+Run these after the pipeline, on its `--outdir`, in the conda environment from `environment.yml`. Pool one read type
+per run (nanopore or illumina).
 
 | Script | What it does |
 | --- | --- |
+| `run_hall.sh` | Runs the pipeline on the four Hall et al. datasets (`manifests/hall_*.csv`), as in our analysis. |
+| `shuffle_reads.sh` | Shuffles a FASTQ file or pair into a fixed random order (Charon fits its model on the first reads). |
 | `leak_regions.py` | Positions of microbial-called reads that map to the human reference (from `<sample>/mapped/*.microbial.sam`): per-read, per-locus, per-bin tables and a summary. |
 | `compare_common.py` | Host / microbial / unclassified calls on the reads every classifier processed, with 95% Wilson intervals. Reports reads Charon filtered out (below its min quality / length) separately. |
 | `plot_leak_ideogram.py` | One figure per chromosome (chr1-22, X, Y, M) and a PDF: repeat-content and gene tracks, CenSat/rDNA and segdups, then a read-density heatmap per classifier. Also writes `enrichment.tsv`. |
