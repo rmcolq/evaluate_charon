@@ -82,11 +82,11 @@ for the leak tiers, BLAST, paired reads and other details.
 ## Replicating our analyses
 
 **Hall et al. metagenomes.** The artificial and simulated metagenomes from Hall et al., nanopore and Illumina, are in
-`manifests/hall_*.csv`, which point at the original reads on Zenodo. The originals are grouped by source genome and
+`manifests/hall_ont.csv` and `manifests/hall_illumina.csv` (artificial and simulated in each), which point at the original reads on Zenodo. The originals are grouped by source genome and
 Charon fits its model on the first reads, so these manifests set `shuffle=true`: the pipeline shuffles each file
 (`seqkit shuffle`, seqkit 2.14.0, seed `--shuffle_seed`, default 11; the same seed for both files of a pair keeps the
 mates in step) before running the classifiers. Shuffling holds the file in memory, up to a few times its gzipped size.
-`scripts/run_hall.sh` runs all four:
+`scripts/run_hall.sh` runs both:
 
 ```bash
 CHARON_DB_ONT=charon_big.nanopore.idx CHARON_DB_ILLUMINA=charon_big.illumina.idx BLAST_DB=/db/blast/core_nt \

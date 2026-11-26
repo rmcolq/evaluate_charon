@@ -1,2 +1,0 @@
-sample_id,fastq_1,fastq_2,shuffle
-artificial_illumina,https://zenodo.org/records/10472796/files/all_1.illumina.fq.gz,https://zenodo.org/records/10472796/files/all_2.illumina.fq.gz,true
