@@ -60,7 +60,7 @@ excluded.
 
 BLAST searches the reads which were called microbial and map to the human reference (`modules/blast.nf`, which takes any
 number of FASTA files). With `--blast_db` the search is local: give the database path without extensions, e.g.
-`--blast_db /db/blast/core_nt`, or a directory holding a database called `nt`. The taxonomy files (`taxdb.btd`, `taxdb.bti`,
+`--blast_db /db/blast/core_nt`, or a directory holding a database named after it (`/db/blast/core_nt/core_nt.*`), `core_nt` or `nt`. The taxonomy files (`taxdb.btd`, `taxdb.bti`,
 `taxonomy4blast.sqlite3`) must be in the same directory. `core_nt` is NCBI's default for web BLAST and much smaller than `nt`.
 Without `--blast_db` the search is remote, against NCBI's `nt`, which is slow and rate limited.
 

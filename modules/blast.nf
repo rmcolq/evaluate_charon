@@ -19,10 +19,21 @@ def blast_cache_mount() {
     return workflow.containerEngine in ['singularity', 'apptainer'] ? "-B ${dir}" : "-v ${dir}:${dir}"
 }
 
-// [directory, database name] for --blast_db: a directory means the database nt in it
+def blast_db_exists(dir, name) {
+    return ["${name}.nal", "${name}.nsq", "${name}.00.nsq"].any{ file("${dir}/${it}").exists() }
+}
+
+// [directory, database name] for --blast_db: a path without extensions (/db/blast/core_nt), or a directory holding
+// a database named after it (/db/blast/core_nt/core_nt.*), or core_nt or nt
 def blast_db_parts() {
     def db = file(params.blast_db)
-    return db.isDirectory() ? [db, "nt"] : [db.parent, db.name]
+    if (!db.isDirectory())
+        return [db.parent, db.name]
+    def name = [db.name, "core_nt", "nt"].find{ blast_db_exists(db, it) }
+    if (name)
+        return [db, name]
+    // a directory beside a database of the same name (/db/blast/core_nt/ and /db/blast/core_nt.*)
+    return [db.parent, db.name]
 }
 
 // small for a remote search, so NCBI is not sent one huge request
@@ -144,8 +155,8 @@ workflow blast {
             file(blast_cache_root()).mkdirs()
         // a remote search needs no database, but the input must be a file
         db = params.blast_db ? blast_db_parts() : [file("${projectDir}/assets/NO_FILE", checkIfExists: true), "nt"]
-        if (params.blast_db && !file("${db[0]}/${db[1]}.nal").exists() && !file("${db[0]}/${db[1]}.nsq").exists() && !file("${db[0]}/${db[1]}.00.nsq").exists())
-            error "No BLAST database ${db[1]} in ${db[0]} (--blast_db ${params.blast_db}): give the database path without extensions, e.g. /db/blast/core_nt"
+        if (params.blast_db && !blast_db_exists(db[0], db[1]))
+            error "No BLAST database ${db[1]} in ${db[0]} (--blast_db ${params.blast_db}): give the database path without extensions, e.g. /db/blast/core_nt for /db/blast/core_nt.*.nsq"
 
         query_ch
             .toList()
