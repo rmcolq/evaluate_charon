@@ -19,10 +19,15 @@ in the annotation versus the share of the genome it covers (enrichment > 1: leak
   scripts/plot_leak_ideogram.py --reads results/leak_regions/leak_reads.tsv \
       --samples HG02583 HG02922 NA18983 --classifiers charon deacon deacon_sensitive nohuman \
       --annotations resources/annotations --outdir results/ideogram_nanopore
+
+The annotation files come from the UCSC hub for T2T-CHM13v2.0. Any that are missing from `--annotations` are
+downloaded there on first use (about 215 MB) and checked against UCSC's md5 checksums; `--no_download` turns this off.
 """
 import argparse
 import gzip
+import hashlib
 import os
+import urllib.request
 
 import matplotlib
 matplotlib.use("Agg")
@@ -44,6 +49,45 @@ REPEAT_COLOURS = {
     "LINE": "#4c78a8", "SINE": "#f58518", "LTR": "#54a24b", "DNA": "#b279a2", "satellite": "#e45756",
     "simple/low complexity": "#9d755d", "rRNA": "#000000", "small RNA": "#bab0ac", "other repeat": "#79706e",
 }
+
+
+UCSC_HUB = "https://hgdownload.soe.ucsc.edu/hubs/GCA/009/914/755/GCA_009914755.4"
+# (file, directory under UCSC_HUB, md5 from UCSC_HUB/md5sum.txt)
+ANNOTATION_FILES = [
+    ("GCA_009914755.4.chromAlias.txt", "", "3c7f3f0529a46d9da6fee6aee70a1fed"),
+    ("t2t_censat_CHM13v2.0_trackv2.0.10col.bed", "bbi/GCA_009914755.4_T2T-CHM13v2.0.censat",
+     "b50c88e0e417ba352f7b8a230e5057be"),
+    ("chm13v1.1.rdna_model.bed", "bbi/GCA_009914755.4_T2T-CHM13v2.0.rdnaModel", "057746b63d5a116aee4e016deaf53dd5"),
+    ("T2T-CHM13v2.SDs.bed.gz", "bbi/GCA_009914755.4_T2T-CHM13v2.0.sedefSegDups", "5d3f6592942fd76a8acbaa177e0993cb"),
+    ("chm13v2.0_rmsk.out.gz", "bbi/GCA_009914755.4_T2T-CHM13v2.0.t2tRepeatMasker", "eac086f914d584e9cdc190e42747d377"),
+    ("GCF_009914755.1_T2T-CHM13v2.0.110.20220412.ncbiRefSeq.gtf.gz", "genes", "d5fb63080182480fa9b8e13f27fcaa34"),
+]
+
+
+def md5sum(path):
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def fetch_annotations(ann_dir):
+    """Download any missing annotation file into ann_dir, checking its md5 before keeping it."""
+    os.makedirs(ann_dir, exist_ok=True)
+    for name, subdir, md5 in ANNOTATION_FILES:
+        dest = os.path.join(ann_dir, name)
+        if os.path.exists(dest):
+            continue
+        url = "/".join(x for x in (UCSC_HUB, subdir, name) if x)
+        print(f"downloading {url} ...", flush=True)
+        tmp = dest + ".part"
+        urllib.request.urlretrieve(url, tmp)
+        got = md5sum(tmp)
+        if got != md5:
+            os.remove(tmp)
+            raise SystemExit(f"md5 mismatch for {url}: expected {md5}, got {got}")
+        os.replace(tmp, dest)
 
 
 def opener(path):
@@ -177,7 +221,10 @@ def main():
     ap.add_argument("--reads", required=True, help="leak_reads.tsv from leak_regions.py")
     ap.add_argument("--samples", nargs="+", required=True, help="samples to pool (one read type per run)")
     ap.add_argument("--classifiers", nargs="+", required=True, help="tracks, in order (empty if no leaks)")
-    ap.add_argument("--annotations", default="resources/annotations")
+    ap.add_argument("--annotations", default="resources/annotations",
+                    help="directory of the UCSC annotation files; missing ones are downloaded into it")
+    ap.add_argument("--no_download", action="store_true",
+                    help="use only the annotation files already in --annotations")
     ap.add_argument("--ref_bed", default="resources/T2T_ref.bed", help="chromosome lengths (name, 0, length)")
     ap.add_argument("--bin_size", type=int, default=1_000_000,
                     help="bin for the heatmaps and bar tracks (chromosomes under 5 Mb use 50 bins)")
@@ -186,6 +233,8 @@ def main():
     ap.add_argument("--chromosomes", nargs="*", default=None, help="e.g. chr1 chrX chrM (default: all)")
     a = ap.parse_args()
     os.makedirs(a.outdir, exist_ok=True)
+    if not a.no_download:
+        fetch_annotations(a.annotations)
 
     to_acc, gb_to_ucsc = load_alias(os.path.join(a.annotations, "GCA_009914755.4.chromAlias.txt"))
     rev = {v: k for k, v in to_acc.items()}
