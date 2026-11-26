@@ -1,5 +1,5 @@
 include { bam_to_fastq } from './modules/utils'
-include { stage_fastq; resolve_path; paired_input; csv_rows } from './modules/utils'
+include { stage_fastq; shuffle_fastq; resolve_path; paired_input; csv_rows } from './modules/utils'
 include { evaluate_dehosting } from './modules/evaluate_dehosting'
 include { throttle_samples; release_finished_samples } from './modules/gate'
 
@@ -22,6 +22,7 @@ params {
     eager_cleanup: Boolean
     s3_anonymous: Boolean
     max_cpus: Integer
+    shuffle_seed: Integer
     host_eval_reads: Integer
     chunk_size: Integer
     max_concurrent_samples: Integer
@@ -47,6 +48,25 @@ workflow stage_remote {
             .set{ branched }
     stage_fastq(branched.remote)
     out = branched.local.mix(stage_fastq.out)
+
+    emit:
+    out
+}
+
+// Shuffles the samples in shuffle_ids (the --fastq_csv rows with shuffle=true) and passes the rest through
+workflow shuffle_selected {
+    take:
+    fastq_ch
+    shuffle_ids
+
+    main:
+    fastq_ch.branch{ id, f ->
+                shuffle: id in shuffle_ids
+                keep: true
+            }
+            .set{ branched }
+    shuffle_fastq(branched.shuffle)
+    out = branched.keep.mix(shuffle_fastq.out)
 
     emit:
     out
@@ -83,7 +103,10 @@ workflow {
         evaluate_dehosting(bam_to_fastq.out)
         done_ch = evaluate_dehosting.out.done
     } else if (params.fastq_csv){
-        channel.fromList(csv_rows())
+        def rows = csv_rows()
+        def shuffle_ids = rows.findAll{ row -> row.shuffle?.toString()?.toLowerCase() in ["true", "yes", "1"] }
+                              .collect{ row -> row.sample_id.toString() }
+        channel.fromList(rows)
             .map{ row ->
                 def r1 = file(row.fastq_1, type: "file", checkIfExists: true)
                 [row.sample_id, row.fastq_2 ? [r1, file(row.fastq_2, type: "file", checkIfExists: true)] : r1]
@@ -91,7 +114,8 @@ workflow {
             .set{ fastq_csv_ch }
         throttle_samples(fastq_csv_ch)
         stage_remote(throttle_samples.out)
-        evaluate_dehosting(stage_remote.out)
+        shuffle_selected(stage_remote.out, shuffle_ids)
+        evaluate_dehosting(shuffle_selected.out)
         done_ch = evaluate_dehosting.out.done
     } else if (params.fastq_dir){
         fastq_ch = channel.fromPath("${params.fastq_dir}/*.f*q*", type: "file", checkIfExists: true).map { [it.baseName.replace(".fq","").replace(".fastq",""), it] }

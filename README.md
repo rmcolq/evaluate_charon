@@ -49,7 +49,7 @@ Input, one of:
 | Option | Input |
 | --- | --- |
 | `--fastq` (and `--fastq2` for a pair) | one sample; `--unique_id` names it |
-| `--fastq_csv` | `sample_id,fastq_1,fastq_2` (`fastq_2` empty for single-end reads) |
+| `--fastq_csv` | `sample_id,fastq_1,fastq_2` (`fastq_2` empty for single-end reads), plus an optional `shuffle` column: `true` shuffles that sample's reads first |
 | `--bam_csv` | `sample_id,filepath` of BAM/CRAM files; add `--paired true` for read pairs and `--cram_ref` for CRAMs |
 | `--fastq_dir` | one single-end FASTQ per sample |
 
@@ -82,15 +82,18 @@ for the leak tiers, BLAST, paired reads and other details.
 ## Replicating our analyses
 
 **Hall et al. metagenomes.** The artificial and simulated metagenomes from Hall et al., nanopore and Illumina, are in
-`manifests/hall_*.csv`. They point at shuffled copies of the original reads: Charon fits its model on the first reads,
-and the originals are grouped by source genome. `scripts/run_hall.sh` runs all four:
+`manifests/hall_ont.csv` and `manifests/hall_illumina.csv` (artificial and simulated in each), which point at the original reads on Zenodo. The originals are grouped by source genome and
+Charon fits its model on the first reads, so these manifests set `shuffle=true`: the pipeline shuffles each file
+(`seqkit shuffle`, seqkit 2.14.0, seed `--shuffle_seed`, default 11; the same seed for both files of a pair keeps the
+mates in step) before running the classifiers. Shuffling holds the file in memory, up to a few times its gzipped size.
+`scripts/run_hall.sh` runs both:
 
 ```bash
 CHARON_DB_ONT=charon_big.nanopore.idx CHARON_DB_ILLUMINA=charon_big.illumina.idx BLAST_DB=/db/blast/core_nt \
   scripts/run_hall.sh results/hall
 ```
 
-The original reads are on Zenodo:
+The reads come from these Zenodo records:
 
 | Dataset | Zenodo record | Files |
 |---|---|---|
@@ -98,8 +101,8 @@ The original reads are on Zenodo:
 | Simulated, nanopore | [8339789](https://zenodo.org/records/8339789) | `metagenome.ont.fq.gz` |
 | Artificial, both | [10472796](https://zenodo.org/records/10472796) | `all_1.illumina.fq.gz`, `all_2.illumina.fq.gz`, `all.ont.fq.gz`, `read2truth.{illumina,ont}.tsv` |
 
-The shuffled copies (`*.shuffled.fq.gz`) and the Charon indexes are being deposited on Zenodo; until then the
-manifests' URLs are placeholders. `scripts/shuffle_reads.sh` shuffles other read files the same way.
+The Charon indexes are being deposited on Zenodo. Add `shuffle=true` to your own `--fastq_csv` rows to shuffle other
+read files the same way.
 
 **Human samples (HPRC).** `manifests/human_nanopore.csv` (and a 10-sample `human_nanopore_mini.csv`) and
 `manifests/human_illumina_paired.csv` list public HPRC reads on S3. They are HPRC release 2 samples chosen so that none of

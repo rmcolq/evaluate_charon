@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Replicate the four Hall et al. runs (artificial and simulated metagenomes, nanopore and Illumina), one after another.
+# Replicate the Hall et al. runs: the artificial and simulated metagenomes, one run for nanopore and one for Illumina.
 #   scripts/run_hall.sh <output directory> [extra nextflow options]
 # Set the paths below first. The Charon indexes and the reference can be local paths or URLs (downloaded once into
 # --store_dir). BLAST needs a local database: core_nt matches the web BLAST used to curate the truth sets.
@@ -29,7 +29,5 @@ run() {
         -ansi-log false "$@" > "$outdir/$name/nextflow.log"
 }
 
-run artificial_ont hall_artificial_ont.csv "$CHARON_DB_ONT" ont "$@"
-run artificial_illumina hall_artificial_illumina.csv "$CHARON_DB_ILLUMINA" illumina "$@"
-run simulated_ont hall_simulated_ont.csv "$CHARON_DB_ONT" ont "$@"
-run simulated_illumina hall_simulated_illumina.csv "$CHARON_DB_ILLUMINA" illumina "$@"
+run ont hall_ont.csv "$CHARON_DB_ONT" ont "$@"
+run illumina hall_illumina.csv "$CHARON_DB_ILLUMINA" illumina "$@"

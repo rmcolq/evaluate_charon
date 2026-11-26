@@ -1,0 +1,3 @@
+sample_id,fastq_1,fastq_2,shuffle
+artificial_ont,https://zenodo.org/records/10472796/files/all.ont.fq.gz,,true
+simulated_ont,https://zenodo.org/records/8339789/files/metagenome.ont.fq.gz,,true

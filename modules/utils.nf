@@ -110,6 +110,31 @@ process stage_fastq {
     """
 }
 
+process shuffle_fastq {
+    // Charon fits its model on the first reads, so a file grouped by source genome (as the Hall et al. mixtures
+    // are) is shuffled first. In memory (seqkit's two-pass mode is FASTA only); the same seed shuffles both files
+    // of a pair the same way, so mates stay in step. seqkit is pinned, as another version may give another order.
+    label "process_medium_plus_mem"
+    label "error_retry"
+    container "quay.io/biocontainers/seqkit:2.14.0--hb192632_0"
+    tag "${unique_id}"
+
+    input:
+    tuple val(unique_id), path(fastq)
+
+    output:
+    tuple val(unique_id), path("shuffled_*")
+
+    script:
+    def files = fastq instanceof List ? fastq : [fastq]
+    def cmds = files.collect{ f ->
+        "seqkit shuffle -s ${params.shuffle_seed} -j ${task.cpus} \"${f}\" -o \"shuffled_${f.name.replaceFirst(/^staged_/, '')}\""
+    }.join("\n")
+    """
+    ${cmds}
+    """
+}
+
 // Built once into the store dir. The reference size is in the name, so a changed reference is indexed again.
 process minimap2_index {
     label "process_medium"
