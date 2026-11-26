@@ -1,2 +1,2 @@
-sample_id,fastq_1,fastq_2
-artificial_ont,https://zenodo.org/records/ZENODO_RECORD_PENDING/files/all.ont.shuffled.fq.gz,
+sample_id,fastq_1,fastq_2,shuffle
+artificial_ont,https://zenodo.org/records/10472796/files/all.ont.fq.gz,,true

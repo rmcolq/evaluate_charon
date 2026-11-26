@@ -14,8 +14,8 @@ dependencies:
   - blast=2.16.0
   - deacon=0.20.0
   - nohuman=0.5.1
-  # scripts/shuffle_reads.sh
-  - seqkit
+  # the Hall manifests' shuffle step (pinned: another version may give another order)
+  - seqkit=2.14.0
   # bin/ (in the pipeline) and scripts/ (analysis)
   - python>=3.10,<3.13
   - numpy

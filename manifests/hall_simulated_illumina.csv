@@ -1,2 +1,2 @@
-sample_id,fastq_1,fastq_2
-simulated_illumina,https://zenodo.org/records/ZENODO_RECORD_PENDING/files/metagenome_R1.illumina.shuffled.fq.gz,https://zenodo.org/records/ZENODO_RECORD_PENDING/files/metagenome_R2.illumina.shuffled.fq.gz
+sample_id,fastq_1,fastq_2,shuffle
+simulated_illumina,https://zenodo.org/records/8339791/files/metagenome_R1.illumina.fq.gz,https://zenodo.org/records/8339791/files/metagenome_R2.illumina.fq.gz,true
