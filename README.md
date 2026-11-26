@@ -89,7 +89,9 @@ mates in step) before running the classifiers. Shuffling holds the file in memor
 `scripts/run_hall.sh` runs both:
 
 ```bash
-CHARON_DB_ONT=charon_big.nanopore.idx CHARON_DB_ILLUMINA=charon_big.illumina.idx BLAST_DB=/db/blast/core_nt \
+CHARON_DB_ONT=charon_big.nanopore.idx CHARON_DB_ILLUMINA=charon_big.illumina.idx \
+CHARON_DB_HOST_ONLY_ONT=<host-only nanopore index> CHARON_DB_HOST_ONLY_ILLUMINA=<host-only Illumina index> \
+BLAST_DB=/db/blast/core_nt \
   scripts/run_hall.sh results/hall
 ```
 
