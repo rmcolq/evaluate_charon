@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # Replicate the Hall et al. runs: the artificial and simulated metagenomes, one run for nanopore and one for Illumina.
 #   scripts/run_hall.sh <output directory> [extra nextflow options]
-# Set the paths below first. The Charon indexes and the reference can be local paths or URLs (downloaded once into
-# --store_dir). BLAST needs a local database: core_nt matches the web BLAST used to curate the truth sets.
+# The Charon indexes default to the charon_big indexes on Zenodo; they and the reference can be local paths or URLs
+# (downloaded once into --store_dir). BLAST needs a local database: core_nt matches the web BLAST used to curate the truth sets.
 # Each run has its own --slot_dir, so it does not clash with another pipeline run started from the same directory.
 set -euo pipefail
 
-CHARON_DB_ONT=${CHARON_DB_ONT:?set to the nanopore charon index, e.g. charon_big.nanopore.idx}
-CHARON_DB_ILLUMINA=${CHARON_DB_ILLUMINA:?set to the Illumina charon index, e.g. charon_big.illumina.idx}
-CHARON_DB_HOST_ONLY_ONT=${CHARON_DB_HOST_ONLY_ONT:?set to the nanopore host-only charon index (for --charon_host_only)}
-CHARON_DB_HOST_ONLY_ILLUMINA=${CHARON_DB_HOST_ONLY_ILLUMINA:?set to the Illumina host-only charon index (for --charon_host_only)}
+ONT_INDEXES=https://zenodo.org/records/24559698/files        # 10.5281/zenodo.24559698
+ILLUMINA_INDEXES=https://zenodo.org/records/24531993/files   # 10.5281/zenodo.24531993
+CHARON_DB_ONT=${CHARON_DB_ONT:-$ONT_INDEXES/charon_big.nanopore.idx.gz?download=1}
+CHARON_DB_ILLUMINA=${CHARON_DB_ILLUMINA:-$ILLUMINA_INDEXES/charon_big.illumina.idx.gz?download=1}
+CHARON_DB_HOST_ONLY_ONT=${CHARON_DB_HOST_ONLY_ONT:-$ONT_INDEXES/charon_big_host_only.nanopore.idx.gz?download=1}
+CHARON_DB_HOST_ONLY_ILLUMINA=${CHARON_DB_HOST_ONLY_ILLUMINA:-$ILLUMINA_INDEXES/charon_big_host_only.illumina.idx.gz?download=1}
 BLAST_DB=${BLAST_DB:?set to the BLAST database path without extensions, e.g. /db/blast/core_nt}
 STORE_DIR=${STORE_DIR:-$PWD/store_dir}
 PROFILE=${PROFILE:-docker}

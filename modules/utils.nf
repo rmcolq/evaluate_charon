@@ -19,6 +19,25 @@ def resolve_path(String path) {
     return (path.startsWith('/') || local.exists()) ? local : file("${projectDir}/${path}")
 }
 
+// A path option which the tool needs uncompressed (the Charon indexes are deposited gzipped): a .gz file is
+// decompressed once into <store_dir>/unzipped and that copy is used
+def resolve_unzipped(String path) {
+    def f = resolve_path(path)
+    if (!f.name.endsWith(".gz"))
+        return f
+    def dest = file("${params.store_dir}/unzipped/${f.toString().md5().take(8)}/${f.name.replaceFirst(/\.gz$/, '')}")
+    if (!dest.exists()) {
+        log.info "Decompressing ${f} to ${dest}"
+        def tmp = file("${dest}.part")
+        tmp.parent.mkdirs()
+        new java.util.zip.GZIPInputStream(f.newInputStream(), 1 << 20).withCloseable { input ->
+            java.nio.file.Files.copy(input, tmp, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }
+        tmp.moveTo(dest)
+    }
+    return dest
+}
+
 // All rows must be single-end or all paired: a run maps with one minimap2 preset
 def csv_rows() {
     def rows = file(params.fastq_csv, checkIfExists: true).splitCsv(header: true, quote: '"')
