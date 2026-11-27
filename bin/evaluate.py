@@ -177,7 +177,7 @@ def is_human_hit(staxids):
     return "9606" in staxids.split(";")
 
 def parse_blast_line(line):
-    """Return (hit_set, fields) where hit_set is 'all' or 'nonhuman' and fields are
+    """Return (hit_set, fields) where hit_set is 'all', 'nonhuman' or 'human' (a human genome database) and fields are
     qseqid, sacc, sscinames, staxids, sstart, send, evalue, pident, length, bitscore, qcovs."""
     parts = line.rstrip("\n").split("\t")
     if len(parts) != 12:
@@ -212,7 +212,8 @@ def load_blast_info(blast_results):
                         "pident":0, "top_hit":None, "human_bitscore":np.nan, "human_qcov":np.nan, "human_pident":np.nan,
                         "nonhuman_bitscore":np.nan, "nonhuman_qcov":np.nan, "nonhuman_pident":np.nan,
                         "nonhuman_taxid":None, "nonhuman_name":None})
-            human = is_human_hit(staxids)
+            # hits from the human genome database (--blast_human_db) are human, whatever their taxid column says
+            human = hit_set == "human" or is_human_hit(staxids)
 
             # best hit by bitscore, human and non-human separately (blast output order is not by bitscore)
             if human:
@@ -223,6 +224,11 @@ def load_blast_info(blast_results):
                 entry["nonhuman_taxid"], entry["nonhuman_name"] = staxids, sscinames
 
             if hit_set == "nonhuman":
+                continue
+            if hit_set == "human":
+                entry["blast_human"] = True
+                entry["human_accs"].append(f"{sacc}:{sstart}-{send}")
+                entry["pident"] = max(entry["pident"], pident)
                 continue
 
             # summary of the taxa hit (first hit, then all taxa with at least 90% identity)
@@ -546,10 +552,12 @@ def add_unclassified_to_summary(df, summary):
         summary[f"max_{column}_unclassified"] = df_unclassified[column].max()
         summary[f"min_{column}_unclassified"] = df_unclassified[column].min()
 
-def add_leak_tiers(df, min_blast_cov, min_blast_pident, bitscore_ratio):
+def add_leak_tiers(df, min_blast_cov, min_blast_pident, bitscore_ratio, min_aligned_prop=0.5, min_mapq=10):
     """Assign each read a leak tier (0 = not called microbial); each tier is a subset of the one above.
     1: called microbial
-    2: 1 and maps to the human (T2T) reference, i.e. not unmapped, EBV or another contaminant
+    2: 1 and maps to the human (T2T) reference, i.e. not unmapped, EBV or another contaminant, with the alignment
+       covering at least min_aligned_prop of the read and MAPQ at least min_mapq (a short or ambiguous hit to T2T
+       from a microbial read is not a leak)
     3: 2 and a BLAST human hit with at least min_blast_cov % query coverage and min_blast_pident % identity
     4: 3 and the best human bitscore is at least bitscore_ratio times the best non-human bitscore
        (or there was no non-human hit), so the read is human-specific rather than a shared region.
@@ -559,6 +567,8 @@ def add_leak_tiers(df, min_blast_cov, min_blast_pident, bitscore_ratio):
             df[column] = np.nan
     microbial = df["classification"] == "microbial"
     t2 = microbial & ~df["unmapped"] & ~df["ref"].isin(ebv_accs + mycoplasma_accs + other_accs)
+    t2 = t2 & (pd.to_numeric(df["total_aligned_prop"], errors="coerce") >= min_aligned_prop) \
+            & (pd.to_numeric(df["mapq"], errors="coerce") >= min_mapq)
     human_hit = df["blast_human"].fillna(False).astype(bool)
     if df["human_qcov"].notna().any():
         human_hit = human_hit & (df["human_qcov"] >= min_blast_cov) & (df["human_pident"] >= min_blast_pident)
@@ -690,6 +700,8 @@ def main():
     )
     parser.add_argument("--min_blast_cov", dest="min_blast_cov", type=float, default=80, help="Minimum query coverage (%%) of a BLAST human hit to count at leak tier 3")
     parser.add_argument("--min_blast_pident", dest="min_blast_pident", type=float, default=90, help="Minimum identity (%%) of a BLAST human hit to count at leak tier 3")
+    parser.add_argument("--min_aligned_prop", dest="min_aligned_prop", type=float, default=0.5, help="Minimum fraction of a read covered by its human alignment (primary plus supplementary) to count at leak tier 2")
+    parser.add_argument("--min_mapq", dest="min_mapq", type=int, default=10, help="Minimum MAPQ of the human alignment to count at leak tier 2")
     parser.add_argument("--bitscore_ratio", dest="bitscore_ratio", type=float, default=1.1, help="Human bitscore must be at least this multiple of the best non-human bitscore to count at leak tier 4")
 
     args = parser.parse_args()
@@ -741,13 +753,15 @@ def main():
 
         classifier_df["sample_id"] = sample_id
         classifier_df["classifier"] = classifier
-        classifier_df = add_leak_tiers(classifier_df, args.min_blast_cov, args.min_blast_pident, args.bitscore_ratio)
+        classifier_df = add_leak_tiers(classifier_df, args.min_blast_cov, args.min_blast_pident, args.bitscore_ratio,
+                                       args.min_aligned_prop, args.min_mapq)
         classifier_df.to_csv(full_file, index=False)
     else:
         classifier_df = pd.read_csv(full_file, index_col=None)
         classifier = args.classifier
         classifier_df['classification'] = classifier_df['classification'].fillna("")
-        classifier_df = add_leak_tiers(classifier_df, args.min_blast_cov, args.min_blast_pident, args.bitscore_ratio)
+        classifier_df = add_leak_tiers(classifier_df, args.min_blast_cov, args.min_blast_pident, args.bitscore_ratio,
+                                       args.min_aligned_prop, args.min_mapq)
 
     write_compact_tables(classifier_df, args.prefix)
 

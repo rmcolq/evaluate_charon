@@ -31,8 +31,11 @@ params {
     blast_threads: Integer
     blast_chunk_reads: Integer?
     blast_max_reads: Integer?
-    blast_min_cov: Float
-    blast_min_pident: Float
+    blast_min_cov: Float?
+    blast_min_pident: Float?
+    blast_task: String?
+    leak_min_aligned_prop: Float
+    leak_min_mapq: Integer
     blast_bitscore_ratio: Float
 }
 
