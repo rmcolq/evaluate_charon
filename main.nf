@@ -21,6 +21,7 @@ params {
     reset_slots: Boolean
     eager_cleanup: Boolean
     s3_anonymous: Boolean
+    keep_downloads: Boolean
     max_cpus: Integer
     shuffle_seed: Integer
     host_eval_reads: Integer
@@ -37,6 +38,12 @@ params {
     leak_min_aligned_prop: Float
     leak_min_mapq: Integer
     blast_bitscore_ratio: Float
+}
+
+// A --fastq_csv read file. With --keep_downloads a URL is downloaded once into <store_dir>/downloads and kept,
+// rather than staged in the work directory (where eager cleanup removes it).
+def csv_read(String f) {
+    return file(params.keep_downloads ? resolve_path(f) : f, type: "file", checkIfExists: true)
 }
 
 workflow stage_remote {
@@ -80,11 +87,9 @@ workflow {
     main:
     if (params.reset_slots) file(params.slot_dir).deleteDir()
 
-    if (params.charon && !params.db) {
-        error "Please provide --db (the charon index) when running Nextflow with --charon."
-    }
-    if (params.charon_host_only && !params.db_host_only) {
-        error "Please provide --db_host_only (a charon index of the host only) when running Nextflow with --charon_host_only."
+    // without --db / --db_host_only, the prebuilt indexes are fetched from Zenodo
+    if (params.charon && !params.db && !(params.charon_index in ["big", "small"])) {
+        error "--charon_index must be big or small (the prebuilt index fetched when --db is not given)."
     }
 
     // FASTQ pairs are recognised by having a second file; a BAM/CRAM of pairs (--bam_csv) needs --paired
@@ -111,8 +116,8 @@ workflow {
                               .collect{ row -> row.sample_id.toString() }
         channel.fromList(rows)
             .map{ row ->
-                def r1 = file(row.fastq_1, type: "file", checkIfExists: true)
-                [row.sample_id, row.fastq_2 ? [r1, file(row.fastq_2, type: "file", checkIfExists: true)] : r1]
+                def r1 = csv_read(row.fastq_1)
+                [row.sample_id, row.fastq_2 ? [r1, csv_read(row.fastq_2)] : r1]
             }
             .set{ fastq_csv_ch }
         throttle_samples(fastq_csv_ch)

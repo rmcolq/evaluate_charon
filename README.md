@@ -17,10 +17,24 @@ reference to find mistakes, and confirms human reads left among the microbial ca
    With `-profile conda` the pipeline's processes use this environment too, except Charon, which needs a container.
 
 2. **Reference.** `--refs` is the human (T2T) + EBV + fungi + Mycoplasma reference used for mapping, with `--ref_bed`
-   marking its human contigs (`resources/T2T_ref.bed`). The reference will be on Zenodo; until then give its local path.
+   marking its human contigs (`resources/T2T_ref.bed`). By default it is `T2T_ref_plus_EBV_fungi_mycoplasma.fa.gz` from
+   Zenodo ([10.5281/zenodo.24591756](https://doi.org/10.5281/zenodo.24591756), about 1 GB), downloaded once into
+   `--store_dir`; give `--refs` a local path to use a copy you already have.
 
-3. **Charon index.** `--db`, built with `charon index` (or downloaded once the prebuilt indexes are on Zenodo). The deacon and
-   nohuman indexes are downloaded by the pipeline on first use.
+3. **Charon index.** Without `--db`, the pipeline gets a prebuilt index from Zenodo with `charon fetch`: the
+   `--charon_index` size (`big`, the default, or `small`) for `--read_type`, and for `--charon_host_only` the big
+   host-only index. `charon fetch` decompresses and md5-checks it, and it is kept in `<store_dir>/charon_indexes` for
+   later runs. It follows each record to its latest version; `--charon_index_record <record>` pins one. The prebuilt
+   indexes were built with Charon v1.1.7 (from charon-index-build v1.0.0); `charon fetch` needs v1.1.8 or later, the
+   default `--charon_container`:
+
+   | Read type | Zenodo record | Indexes |
+   |---|---|---|
+   | Nanopore | [10.5281/zenodo.24559698](https://doi.org/10.5281/zenodo.24559698) | `charon_big.nanopore.idx.gz`, `charon_big_host_only.nanopore.idx.gz`, `charon_small.nanopore.idx.gz` |
+   | Illumina | [10.5281/zenodo.24531993](https://doi.org/10.5281/zenodo.24531993) | `charon_big.illumina.idx.gz`, `charon_big_host_only.illumina.idx.gz`, `charon_small.illumina.idx.gz` |
+
+   To use your own index (built with `charon index`) or a copy you already have, give `--db` (and `--db_host_only`)
+   its path, uncompressed. The deacon and nohuman indexes are downloaded by the pipeline on first use.
 
 4. **BLAST database** (for leak confirmation). A local `core_nt` with the taxonomy files, for example:
 
@@ -38,7 +52,6 @@ Any path option (`--refs`, `--db`, a CSV's reads) can also be a URL: it is downl
 ```bash
 nextflow run main.nf -profile docker \
   --fastq reads.fq.gz --unique_id my_sample --read_type ont \
-  --db charon.idx --refs T2T_ref_plus_EBV_fungi_mycoplasma.fa.gz \
   --charon true --deacon true --nohuman true \
   --evaluate_host true --evaluate_microbial true \
   --blast_db /db/blast/core_nt --store_dir $PWD/store_dir --outdir results
@@ -86,14 +99,20 @@ for the leak tiers, BLAST, paired reads and other details.
 Charon fits its model on the first reads, so these manifests set `shuffle=true`: the pipeline shuffles each file
 (`seqkit shuffle`, seqkit 2.14.0, seed `--shuffle_seed`, default 11; the same seed for both files of a pair keeps the
 mates in step) before running the classifiers. Shuffling holds the file in memory, up to a few times its gzipped size.
+With `--keep_downloads true`, as `run_hall.sh` sets, the reads are downloaded once into `<store_dir>/downloads` and kept
+for later runs; otherwise reads given as URLs are staged in the work directory and removed by eager cleanup.
 `scripts/run_hall.sh` runs both:
 
 ```bash
-CHARON_DB_ONT=charon_big.nanopore.idx CHARON_DB_ILLUMINA=charon_big.illumina.idx \
-CHARON_DB_HOST_ONLY_ONT=<host-only nanopore index> CHARON_DB_HOST_ONLY_ILLUMINA=<host-only Illumina index> \
-BLAST_DB=/db/blast/core_nt \
-  scripts/run_hall.sh results/hall
+BLAST_DB=/db/blast/core_nt scripts/run_hall.sh results/hall
 ```
+
+By default it fetches the `charon_big` and `charon_big_host_only` indexes, pinned to the Zenodo records above
+(`ONT_RECORD`, `ILLUMINA_RECORD`); set `CHARON_DB_ONT`, `CHARON_DB_ILLUMINA`, `CHARON_DB_HOST_ONLY_ONT` and
+`CHARON_DB_HOST_ONLY_ILLUMINA` to use other indexes (uncompressed local paths), and `REFS` to use a local copy of the
+reference instead of downloading it. `BLAST_HUMAN_DB` adds a human BLAST database (`--blast_human_db`, e.g. NCBI's
+`human_genome`), since `core_nt` has no human chromosomes. The script keeps the work directory (`--eager_cleanup false`) and
+runs with `-resume`, so running it again reuses every task whose inputs have not changed.
 
 The reads come from these Zenodo records:
 
@@ -103,7 +122,7 @@ The reads come from these Zenodo records:
 | Simulated, nanopore | [8339789](https://zenodo.org/records/8339789) | `metagenome.ont.fq.gz` |
 | Artificial, both | [10472796](https://zenodo.org/records/10472796) | `all_1.illumina.fq.gz`, `all_2.illumina.fq.gz`, `all.ont.fq.gz`, `read2truth.{illumina,ont}.tsv` |
 
-The Charon indexes are being deposited on Zenodo. Add `shuffle=true` to your own `--fastq_csv` rows to shuffle other
+Add `shuffle=true` to your own `--fastq_csv` rows to shuffle other
 read files the same way.
 
 **Human samples (HPRC).** `manifests/human_nanopore.csv` (and a 10-sample `human_nanopore_mini.csv`) and
@@ -115,11 +134,11 @@ index already holds, not of unseen human genomes.
 
 ```bash
 nextflow run main.nf -profile docker --bam_csv manifests/human_nanopore_mini.csv --s3_anonymous true \
-  --read_type ont --db charon_big.nanopore.idx --charon true --deacon true --deacon_sensitive true --nohuman true \
+  --read_type ont --charon true --deacon true --deacon_sensitive true --nohuman true \
   --evaluate_host true --evaluate_microbial true --blast_db /db/blast/core_nt --store_dir $PWD/store_dir --outdir results/hprc_ont
 
 nextflow run main.nf -profile docker --bam_csv manifests/human_illumina_paired.csv --paired true --s3_anonymous true \
-  --cram_ref GRCh38_full_analysis_set_plus_decoy_hla.fa --read_type illumina --db charon_big.illumina.idx \
+  --cram_ref GRCh38_full_analysis_set_plus_decoy_hla.fa --read_type illumina \
   --charon true --deacon true --deacon_sensitive true --nohuman true \
   --evaluate_host true --evaluate_microbial true --blast_db /db/blast/core_nt --store_dir $PWD/store_dir --outdir results/hprc_illumina
 ```
