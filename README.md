@@ -107,7 +107,8 @@ BLAST_DB=/db/blast/core_nt scripts/run_hall.sh results/hall
 
 By default it fetches the `charon_big` and `charon_big_host_only` indexes, pinned to the Zenodo records above
 (`ONT_RECORD`, `ILLUMINA_RECORD`); set `CHARON_DB_ONT`, `CHARON_DB_ILLUMINA`, `CHARON_DB_HOST_ONLY_ONT` and
-`CHARON_DB_HOST_ONLY_ILLUMINA` to use other indexes (uncompressed local paths).
+`CHARON_DB_HOST_ONLY_ILLUMINA` to use other indexes (uncompressed local paths), and `REFS` to use a local copy of the
+reference instead of downloading it.
 
 The reads come from these Zenodo records:
 
