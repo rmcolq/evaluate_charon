@@ -99,6 +99,8 @@ for the leak tiers, BLAST, paired reads and other details.
 Charon fits its model on the first reads, so these manifests set `shuffle=true`: the pipeline shuffles each file
 (`seqkit shuffle`, seqkit 2.14.0, seed `--shuffle_seed`, default 11; the same seed for both files of a pair keeps the
 mates in step) before running the classifiers. Shuffling holds the file in memory, up to a few times its gzipped size.
+With `--keep_downloads true`, as `run_hall.sh` sets, the reads are downloaded once into `<store_dir>/downloads` and kept
+for later runs; otherwise reads given as URLs are staged in the work directory and removed by eager cleanup.
 `scripts/run_hall.sh` runs both:
 
 ```bash
@@ -108,7 +110,8 @@ BLAST_DB=/db/blast/core_nt scripts/run_hall.sh results/hall
 By default it fetches the `charon_big` and `charon_big_host_only` indexes, pinned to the Zenodo records above
 (`ONT_RECORD`, `ILLUMINA_RECORD`); set `CHARON_DB_ONT`, `CHARON_DB_ILLUMINA`, `CHARON_DB_HOST_ONLY_ONT` and
 `CHARON_DB_HOST_ONLY_ILLUMINA` to use other indexes (uncompressed local paths), and `REFS` to use a local copy of the
-reference instead of downloading it.
+reference instead of downloading it. `BLAST_HUMAN_DB` adds a human BLAST database (`--blast_human_db`, e.g. NCBI's
+`human_genome`), since `core_nt` has no human chromosomes.
 
 The reads come from these Zenodo records:
 

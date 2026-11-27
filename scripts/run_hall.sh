@@ -14,6 +14,7 @@ CHARON_DB_ONT=${CHARON_DB_ONT:-}
 CHARON_DB_ILLUMINA=${CHARON_DB_ILLUMINA:-}
 CHARON_DB_HOST_ONLY_ONT=${CHARON_DB_HOST_ONLY_ONT:-}
 CHARON_DB_HOST_ONLY_ILLUMINA=${CHARON_DB_HOST_ONLY_ILLUMINA:-}
+BLAST_HUMAN_DB=${BLAST_HUMAN_DB:-}   # optional human BLAST database (e.g. /db/blast/human_genome) for the best human hit
 REFS=${REFS:-}   # a local copy of T2T_ref_plus_EBV_fungi_mycoplasma.fa.gz; unset: downloaded from Zenodo once
 BLAST_DB=${BLAST_DB:?set to the BLAST database path without extensions, e.g. /db/blast/core_nt}
 STORE_DIR=${STORE_DIR:-$PWD/store_dir}
@@ -31,12 +32,13 @@ run() {
     [[ -n $db ]] && opts+=(--db "$db")
     [[ -n $db_host_only ]] && opts+=(--db_host_only "$db_host_only")
     [[ -n $REFS ]] && opts+=(--refs "$REFS")
+    [[ -n $BLAST_HUMAN_DB ]] && opts+=(--blast_human_db "$BLAST_HUMAN_DB")
     mkdir -p "$outdir/$name"
     nextflow run "$pipeline/main.nf" -profile "$PROFILE" \
         --fastq_csv "$pipeline/manifests/$manifest" \
         "${opts[@]}" --read_type "$read_type" \
         --charon true --charon_host_only true --deacon true --deacon_sensitive true --nohuman true \
-        --evaluate_host true --evaluate_microbial true \
+        --evaluate_host true --evaluate_microbial true --keep_downloads true \
         --blast_db "$BLAST_DB" --store_dir "$STORE_DIR" \
         --outdir "$outdir/$name" --slot_dir "$outdir/$name/.charon_slots" \
         -ansi-log false "$@" &> "$outdir/$name/nextflow.log"
