@@ -17,7 +17,9 @@ reference to find mistakes, and confirms human reads left among the microbial ca
    With `-profile conda` the pipeline's processes use this environment too, except Charon, which needs a container.
 
 2. **Reference.** `--refs` is the human (T2T) + EBV + fungi + Mycoplasma reference used for mapping, with `--ref_bed`
-   marking its human contigs (`resources/T2T_ref.bed`). The reference will be on Zenodo; until then give its local path.
+   marking its human contigs (`resources/T2T_ref.bed`). By default it is `T2T_ref_plus_EBV_fungi_mycoplasma.fa.gz` from
+   Zenodo ([10.5281/zenodo.24591756](https://doi.org/10.5281/zenodo.24591756), about 1 GB), downloaded once into
+   `--store_dir`; give `--refs` a local path to use a copy you already have.
 
 3. **Charon index.** `--db`: one of the prebuilt indexes on Zenodo, or your own built with `charon index`. The
    prebuilt ones were built with Charon v1.1.7 (from charon-index-build v1.0.0) and need v1.1.7 or later, the
@@ -49,7 +51,7 @@ For example, `--db https://zenodo.org/records/24559698/files/charon_big.nanopore
 ```bash
 nextflow run main.nf -profile docker \
   --fastq reads.fq.gz --unique_id my_sample --read_type ont \
-  --db charon.idx --refs T2T_ref_plus_EBV_fungi_mycoplasma.fa.gz \
+  --db charon.idx \
   --charon true --deacon true --nohuman true \
   --evaluate_host true --evaluate_microbial true \
   --blast_db /db/blast/core_nt --store_dir $PWD/store_dir --outdir results
