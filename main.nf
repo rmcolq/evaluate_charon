@@ -80,11 +80,9 @@ workflow {
     main:
     if (params.reset_slots) file(params.slot_dir).deleteDir()
 
-    if (params.charon && !params.db) {
-        error "Please provide --db (the charon index) when running Nextflow with --charon."
-    }
-    if (params.charon_host_only && !params.db_host_only) {
-        error "Please provide --db_host_only (a charon index of the host only) when running Nextflow with --charon_host_only."
+    // without --db / --db_host_only, the prebuilt indexes are fetched from Zenodo
+    if (params.charon && !params.db && !(params.charon_index in ["big", "small"])) {
+        error "--charon_index must be big or small (the prebuilt index fetched when --db is not given)."
     }
 
     // FASTQ pairs are recognised by having a second file; a BAM/CRAM of pairs (--bam_csv) needs --paired

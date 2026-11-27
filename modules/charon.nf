@@ -1,10 +1,58 @@
 #!/usr/bin/env nextflow
-include { minimap2_microbial; minimap2_host; extract_blast_queries; is_paired; reads_prefix; reads_glob; publish_reads; minimap2_unclassified; alignment_table } from '../modules/utils'
+include { resolve_path; minimap2_microbial; minimap2_host; extract_blast_queries; is_paired; reads_prefix; reads_glob; publish_reads; minimap2_unclassified; alignment_table } from '../modules/utils'
 
 // Charon holds the index in memory plus ~7 GB (peak 14.2 GB with the 7.1 GB nanopore index) and is given 80% of the
 // request as --max-memory, which must stay above the peak
 def charon_memory(db, attempt) {
     return new nextflow.util.MemoryUnit((db.size() * 1.5) as long + 8.GB.toBytes()) * attempt
+}
+
+// A prebuilt Charon index from Zenodo, fetched once (already decompressed and md5-checked) into
+// <store_dir>/charon_indexes/<record or "latest">/charon_<size>[_host_only].<tech>.idx
+process fetch_charon_index {
+
+    label "process_single"
+    label "error_retry"
+    container params.charon_container
+    storeDir { "${params.store_dir}/charon_indexes/${params.charon_index_record ?: 'latest'}" }
+
+    input:
+    val(tech)
+    val(size)
+    val(host_only)
+
+    output:
+    path("charon_${size}${host_only ? '_host_only' : ''}.${tech}.idx")
+
+    script:
+    def record = params.charon_index_record ? "--record ${params.charon_index_record}" : ""
+    """
+    charon fetch --tech ${tech} --size ${size} ${host_only ? '--host-only' : ''} ${record} -o .
+    """
+
+    stub:
+    """
+    echo "${tech} ${size} ${host_only} ${params.charon_index_record}" > charon_${size}${host_only ? '_host_only' : ''}.${tech}.idx
+    """
+}
+
+// The Charon index for a run: --db (or --db_host_only) if given, else the prebuilt one for --read_type from Zenodo.
+// Host-only indexes are only built big.
+workflow charon_index {
+    take:
+    host_only
+
+    main:
+    def db = host_only ? params.db_host_only : params.db
+    if (db) {
+        index = channel.value(file(resolve_path(db), type: "file", checkIfExists: true))
+    } else {
+        def tech = params.read_type == "illumina" ? "illumina" : "nanopore"
+        index = fetch_charon_index(tech, host_only ? "big" : params.charon_index, host_only)
+    }
+
+    emit:
+    index
 }
 
 // microbial_category is the category of reads kept: "microbial", or "non_host" for a host-only index

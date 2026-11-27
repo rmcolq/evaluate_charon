@@ -21,8 +21,11 @@ reference to find mistakes, and confirms human reads left among the microbial ca
    Zenodo ([10.5281/zenodo.24591756](https://doi.org/10.5281/zenodo.24591756), about 1 GB), downloaded once into
    `--store_dir`; give `--refs` a local path to use a copy you already have.
 
-3. **Charon index.** `--db`: one of the prebuilt indexes on Zenodo, or your own built with `charon index`. The
-   prebuilt ones were built with Charon v1.1.7 (from charon-index-build v1.0.0) and need v1.1.7 or later, the
+3. **Charon index.** Without `--db`, the pipeline gets a prebuilt index from Zenodo with `charon fetch`: the
+   `--charon_index` size (`big`, the default, or `small`) for `--read_type`, and for `--charon_host_only` the big
+   host-only index. `charon fetch` decompresses and md5-checks it, and it is kept in `<store_dir>/charon_indexes` for
+   later runs. It follows each record to its latest version; `--charon_index_record <record>` pins one. The prebuilt
+   indexes were built with Charon v1.1.7 (from charon-index-build v1.0.0); `charon fetch` needs v1.1.8 or later, the
    default `--charon_container`:
 
    | Read type | Zenodo record | Indexes |
@@ -30,9 +33,8 @@ reference to find mistakes, and confirms human reads left among the microbial ca
    | Nanopore | [10.5281/zenodo.24559698](https://doi.org/10.5281/zenodo.24559698) | `charon_big.nanopore.idx.gz`, `charon_big_host_only.nanopore.idx.gz`, `charon_small.nanopore.idx.gz` |
    | Illumina | [10.5281/zenodo.24531993](https://doi.org/10.5281/zenodo.24531993) | `charon_big.illumina.idx.gz`, `charon_big_host_only.illumina.idx.gz`, `charon_small.illumina.idx.gz` |
 
-   Give `--db` (and `--db_host_only`) the download URL, `https://zenodo.org/records/<record>/files/<index>?download=1`,
-   or a local copy. A gzipped index is decompressed once into `--store_dir`. The deacon and nohuman indexes are
-   downloaded by the pipeline on first use.
+   To use your own index (built with `charon index`) or a copy you already have, give `--db` (and `--db_host_only`)
+   its path, uncompressed. The deacon and nohuman indexes are downloaded by the pipeline on first use.
 
 4. **BLAST database** (for leak confirmation). A local `core_nt` with the taxonomy files, for example:
 
@@ -44,14 +46,12 @@ reference to find mistakes, and confirms human reads left among the microbial ca
    Without `--blast_db`, BLAST runs remotely at NCBI, which is slow and sends your reads to NCBI.
 
 Any path option (`--refs`, `--db`, a CSV's reads) can also be a URL: it is downloaded once into `--store_dir`.
-For example, `--db https://zenodo.org/records/24559698/files/charon_big.nanopore.idx.gz?download=1`.
 
 ## Quick run
 
 ```bash
 nextflow run main.nf -profile docker \
   --fastq reads.fq.gz --unique_id my_sample --read_type ont \
-  --db charon.idx \
   --charon true --deacon true --nohuman true \
   --evaluate_host true --evaluate_microbial true \
   --blast_db /db/blast/core_nt --store_dir $PWD/store_dir --outdir results
@@ -105,8 +105,9 @@ mates in step) before running the classifiers. Shuffling holds the file in memor
 BLAST_DB=/db/blast/core_nt scripts/run_hall.sh results/hall
 ```
 
-By default it uses the `charon_big` and `charon_big_host_only` indexes from Zenodo; set `CHARON_DB_ONT`,
-`CHARON_DB_ILLUMINA`, `CHARON_DB_HOST_ONLY_ONT` and `CHARON_DB_HOST_ONLY_ILLUMINA` to use others (local paths or URLs).
+By default it fetches the `charon_big` and `charon_big_host_only` indexes, pinned to the Zenodo records above
+(`ONT_RECORD`, `ILLUMINA_RECORD`); set `CHARON_DB_ONT`, `CHARON_DB_ILLUMINA`, `CHARON_DB_HOST_ONLY_ONT` and
+`CHARON_DB_HOST_ONLY_ILLUMINA` to use other indexes (uncompressed local paths).
 
 The reads come from these Zenodo records:
 
@@ -128,12 +129,11 @@ index already holds, not of unseen human genomes.
 
 ```bash
 nextflow run main.nf -profile docker --bam_csv manifests/human_nanopore_mini.csv --s3_anonymous true \
-  --read_type ont --db "https://zenodo.org/records/24559698/files/charon_big.nanopore.idx.gz?download=1" --charon true --deacon true --deacon_sensitive true --nohuman true \
+  --read_type ont --charon true --deacon true --deacon_sensitive true --nohuman true \
   --evaluate_host true --evaluate_microbial true --blast_db /db/blast/core_nt --store_dir $PWD/store_dir --outdir results/hprc_ont
 
 nextflow run main.nf -profile docker --bam_csv manifests/human_illumina_paired.csv --paired true --s3_anonymous true \
   --cram_ref GRCh38_full_analysis_set_plus_decoy_hla.fa --read_type illumina \
-  --db "https://zenodo.org/records/24531993/files/charon_big.illumina.idx.gz?download=1" \
   --charon true --deacon true --deacon_sensitive true --nohuman true \
   --evaluate_host true --evaluate_microbial true --blast_db /db/blast/core_nt --store_dir $PWD/store_dir --outdir results/hprc_illumina
 ```

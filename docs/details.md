@@ -130,7 +130,8 @@ no relative threshold (`-a 1 -r 0`). nohuman has no equivalent mode.
 Charon's own defaults apply, which differ for single-end and paired reads. `--charon_args` passes extra options to
 `charon dehost`, e.g. `--charon_args "--confidence 10"`, for both charon runs.
 
-`--charon_host_only` runs charon again with an index of the host only (`--db_host_only`), so reads are called host or not host. Reads
+`--charon_host_only` runs charon again with an index of the host only (`--db_host_only`, by default the prebuilt
+`charon_big_host_only` index for `--read_type`, fetched from Zenodo), so reads are called host or not host. Reads
 which are not called host are kept, as for deacon and nohuman, and it is named `charon_host_only` in all outputs. It uses the same charon image
 as the normal run, set with `--charon_container`.
 The host-only index should be built from the same host sequences and k-mer settings as the full index, so that the only difference

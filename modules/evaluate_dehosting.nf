@@ -1,9 +1,10 @@
-include { evaluate_charon } from '../modules/charon'
+include { evaluate_charon; charon_index } from '../modules/charon'
+include { charon_index as charon_index_host_only } from '../modules/charon'
 include { evaluate_charon as evaluate_charon_host_only } from '../modules/charon'
 include { evaluate_deacon; download_deacon_index } from '../modules/deacon'
 include { evaluate_deacon as evaluate_deacon_sensitive } from '../modules/deacon'
 include { evaluate_nohuman } from '../modules/nohuman'
-include { evaluate_summary; mapping_index; resolve_unzipped } from '../modules/utils'
+include { evaluate_summary; mapping_index } from '../modules/utils'
 include { blast } from '../modules/blast'
 
 // [id, classifier, report, host_sam, host_sampled_ids, microbial_sam, blast_result] for evaluate_summary. A sample
@@ -46,13 +47,15 @@ workflow evaluate_dehosting {
     refs = mapping_index.out.index
 
     if (params.charon){
-      evaluate_charon(fastq_ch, file(resolve_unzipped(params.db), type: "file", checkIfExists: true), "charon", "microbial", refs)
+      charon_index(false)
+      evaluate_charon(fastq_ch, charon_index.out, "charon", "microbial", refs)
       query_ch = query_ch.mix(evaluate_charon.out.blast_queries)
       done_ch = done_ch.mix(reads_done(evaluate_charon.out))
     }
 
     if (params.charon_host_only){
-      evaluate_charon_host_only(fastq_ch, file(resolve_unzipped(params.db_host_only), type: "file", checkIfExists: true), "charon_host_only", "non_host", refs)
+      charon_index_host_only(true)
+      evaluate_charon_host_only(fastq_ch, charon_index_host_only.out, "charon_host_only", "non_host", refs)
       query_ch = query_ch.mix(evaluate_charon_host_only.out.blast_queries)
       done_ch = done_ch.mix(reads_done(evaluate_charon_host_only.out))
     }
