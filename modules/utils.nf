@@ -36,6 +36,30 @@ def minimap2_preset() {
     return (paired_input() || params.read_type == "illumina") ? "sr" : "map-ont"
 }
 
+// Nanopore reads have a far higher error rate than Illumina: leaked human reads align at ~75% identity
+// (Hall et al. artificial ONT), so the BLAST search and leak tier 3 use looser defaults for them.
+def noisy_reads() {
+    return minimap2_preset() == "map-ont"
+}
+
+def blast_min_pident() {
+    return params.blast_min_pident != null ? params.blast_min_pident : (noisy_reads() ? 70 : 90)
+}
+
+def blast_min_cov() {
+    return params.blast_min_cov != null ? params.blast_min_cov : (noisy_reads() ? 50 : 80)
+}
+
+// dc-megablast seeds on discontiguous words, so it finds hits megablast misses in error-rich reads
+def blast_task() {
+    return params.blast_task ?: (noisy_reads() ? "dc-megablast" : "megablast")
+}
+
+// identity filter applied during the search: no stricter than tier 3 needs
+def blast_search_pident() {
+    return Math.min(85, blast_min_pident() as double)
+}
+
 // Reads travel as one file, or a list of two (R1, R2) for a pair
 def is_paired(reads) {
     return reads instanceof List
@@ -440,8 +464,10 @@ process evaluate_summary {
       --classifier ${classifier} \
       --sample_id ${unique_id} \
       --contaminant_accs ${contaminant_accs} \
-      --min_blast_cov ${params.blast_min_cov} \
-      --min_blast_pident ${params.blast_min_pident} \
+      --min_blast_cov ${blast_min_cov()} \
+      --min_blast_pident ${blast_min_pident()} \
+      --min_aligned_prop ${params.leak_min_aligned_prop} \
+      --min_mapq ${params.leak_min_mapq} \
       --bitscore_ratio ${params.blast_bitscore_ratio} \
       -p "${unique_id}_${classifier}"
     """

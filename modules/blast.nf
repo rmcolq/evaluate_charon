@@ -7,9 +7,13 @@
  * Result lines are "all" or "nonhuman" (the search) then the BLAST columns, or "failed<TAB>read_id".
  */
 
+include { blast_task; blast_search_pident } from './utils'
+
 // The cache is outside the task directory, so containers need it mounted (created first, or docker creates it as root)
 def blast_cache_root() {
-    return file(params.store_dir).toAbsolutePath().normalize().toString() + "/blast_cache"
+    // one cache per search setting, so results from other settings are not reused
+    def human = params.blast_human_db ? "_human-${file(params.blast_human_db).name}" : ""
+    return file(params.store_dir).toAbsolutePath().normalize().toString() + "/blast_cache/${blast_task()}_pid${blast_search_pident()}${human}"
 }
 
 def blast_cache_mount() {
@@ -19,10 +23,21 @@ def blast_cache_mount() {
     return workflow.containerEngine in ['singularity', 'apptainer'] ? "-B ${dir}" : "-v ${dir}:${dir}"
 }
 
-// [directory, database name] for --blast_db: a directory means the database nt in it
-def blast_db_parts() {
-    def db = file(params.blast_db)
-    return db.isDirectory() ? [db, "nt"] : [db.parent, db.name]
+def blast_db_exists(dir, name) {
+    return ["${name}.nal", "${name}.nsq", "${name}.00.nsq"].any{ file("${dir}/${it}").exists() }
+}
+
+// [directory, database name] for a database option: a path without extensions (/db/blast/core_nt), or a directory
+// holding a database named after it (/db/blast/core_nt/core_nt.*) or one of the default names
+def blast_db_parts(path = params.blast_db, default_names = ["core_nt", "nt"]) {
+    def db = file(path)
+    if (!db.isDirectory())
+        return [db.parent, db.name]
+    def name = ([db.name] + default_names).find{ blast_db_exists(db, it) }
+    if (name)
+        return [db, name]
+    // a directory beside a database of the same name (/db/blast/core_nt/ and /db/blast/core_nt.*)
+    return [db.parent, db.name]
 }
 
 // small for a remote search, so NCBI is not sent one huge request
@@ -72,6 +87,8 @@ process blastn_chunk {
     path(chunk)
     path(blast_db_dir)
     val(blast_db_name)
+    path(human_db_dir, stageAs: "human_db_dir")
+    val(human_db_name)
 
     output:
     path("results_${chunk.baseName}.txt")
@@ -83,10 +100,15 @@ process blastn_chunk {
     outfmt = '"6 qseqid sacc sscinames staxids sstart send evalue pident length bitscore qcovs"'
     // the second search excludes human (9606) to find the best non-human hit, for leak tier 4
     limit_secs = remote ? (params.blast_remote_timeout as nextflow.util.Duration).toSeconds() : 24 * 3600
-    blast_args = "-query ${chunk} ${dbopts} -evalue 1e-6 -perc_identity 85 -max_target_seqs ${params.blast_max_targets} -outfmt ${outfmt}"
+    search_opts = "-query ${chunk} -task ${blast_task()} -evalue 1e-6 -perc_identity ${blast_search_pident()} -max_target_seqs ${params.blast_max_targets} -outfmt ${outfmt}"
+    blast_args = "${dbopts} ${search_opts}"
     search_all = "timeout \$((attempt * ${limit_secs})) blastn ${blast_args} -out all.tmp"
     search_nonhuman = "timeout \$((attempt * ${limit_secs})) blastn ${blast_args} -negative_taxids 9606 -out nonhuman.tmp"
-    result_files = params.blast_nonhuman ? "all.txt nonhuman.txt" : "all.txt"
+    // with --blast_human_db, the best human hit comes from a human genome database (core_nt has no eukaryotic
+    // chromosomes, so its human hits are clones and short records)
+    human_db = params.blast_human_db ? true : false
+    search_human = human_db ? "timeout \$((attempt * ${limit_secs})) blastn -db ${human_db_dir}/${human_db_name} -num_threads ${task.cpus} ${search_opts} -out human.tmp" : "true"
+    result_files = (params.blast_nonhuman ? "all.txt nonhuman.txt" : "all.txt") + (human_db ? " human.txt" : "")
     wait_between = remote ? "sleep \$((attempt * 60))" : "true"
     """
     set -u
@@ -96,7 +118,8 @@ process blastn_chunk {
       # a search which finished (renamed from .tmp) is not run again on a later attempt
       [ -e all.txt ] || { ${search_all} && mv all.tmp all.txt; } || true
       ${params.blast_nonhuman ? "[ -e nonhuman.txt ] || { ${search_nonhuman} && mv nonhuman.tmp nonhuman.txt; } || true" : "true"}
-      if [ -e all.txt ] ${params.blast_nonhuman ? "&& [ -e nonhuman.txt ]" : ""}; then ok=1; break; fi
+      ${human_db ? "[ -e human.txt ] || { ${search_human} && mv human.tmp human.txt; } || true" : "true"}
+      if [ -e all.txt ] ${params.blast_nonhuman ? "&& [ -e nonhuman.txt ]" : ""} ${human_db ? "&& [ -e human.txt ]" : ""}; then ok=1; break; fi
       echo "BLAST attempt \$attempt failed" >&2
       ${wait_between}
     done
@@ -144,8 +167,13 @@ workflow blast {
             file(blast_cache_root()).mkdirs()
         // a remote search needs no database, but the input must be a file
         db = params.blast_db ? blast_db_parts() : [file("${projectDir}/assets/NO_FILE", checkIfExists: true), "nt"]
-        if (params.blast_db && !file("${db[0]}/${db[1]}.nal").exists() && !file("${db[0]}/${db[1]}.nsq").exists() && !file("${db[0]}/${db[1]}.00.nsq").exists())
-            error "No BLAST database ${db[1]} in ${db[0]} (--blast_db ${params.blast_db}): give the database path without extensions, e.g. /db/blast/core_nt"
+        if (params.blast_human_db && !params.blast_db)
+            error "--blast_human_db needs a local --blast_db for the other searches"
+        human = params.blast_human_db ? blast_db_parts(params.blast_human_db, ["human_genome"]) : [file("${projectDir}/assets/NO_FILE", checkIfExists: true), "none"]
+        if (params.blast_human_db && !blast_db_exists(human[0], human[1]))
+            error "No BLAST database ${human[1]} in ${human[0]} (--blast_human_db ${params.blast_human_db}): give the database path without extensions"
+        if (params.blast_db && !blast_db_exists(db[0], db[1]))
+            error "No BLAST database ${db[1]} in ${db[0]} (--blast_db ${params.blast_db}): give the database path without extensions, e.g. /db/blast/core_nt for /db/blast/core_nt.*.nsq"
 
         query_ch
             .toList()
@@ -156,7 +184,7 @@ workflow blast {
             }
             .set{ pool_in }
         pool_blast_queries(pool_in.manifest, pool_in.files)
-        blastn_chunk(pool_blast_queries.out.chunks.flatten(), db[0], db[1])
+        blastn_chunk(pool_blast_queries.out.chunks.flatten(), db[0], db[1], human[0], human[1])
         split_blast_results(pool_blast_queries.out.tables, blastn_chunk.out.collect().ifEmpty([]))
         split_blast_results.out
             .flatten()

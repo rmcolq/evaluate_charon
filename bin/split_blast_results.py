@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Give each sample and method its BLAST results from the pooled search (see pool_blast_queries.py).
 
-Each result line is "<search>\t<BLAST line>", <search> being "all" or "nonhuman"; the query id (q<N>) is replaced by
+Each result line is "<search>\t<BLAST line>", <search> being "all", "nonhuman" or "human"; the query id (q<N>) is replaced by
 the read id. A read whose search failed, or whose chunk has no result file (its task failed), is written as
 "failed\t<read id>". New results are added to the cache, if there is one; reads which were not searched this time
 take their results from it.
