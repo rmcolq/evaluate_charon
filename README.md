@@ -111,7 +111,8 @@ By default it fetches the `charon_big` and `charon_big_host_only` indexes, pinne
 (`ONT_RECORD`, `ILLUMINA_RECORD`); set `CHARON_DB_ONT`, `CHARON_DB_ILLUMINA`, `CHARON_DB_HOST_ONLY_ONT` and
 `CHARON_DB_HOST_ONLY_ILLUMINA` to use other indexes (uncompressed local paths), and `REFS` to use a local copy of the
 reference instead of downloading it. `BLAST_HUMAN_DB` adds a human BLAST database (`--blast_human_db`, e.g. NCBI's
-`human_genome`), since `core_nt` has no human chromosomes.
+`human_genome`), since `core_nt` has no human chromosomes. The script keeps the work directory (`--eager_cleanup false`) and
+runs with `-resume`, so running it again reuses every task whose inputs have not changed.
 
 The reads come from these Zenodo records:
 

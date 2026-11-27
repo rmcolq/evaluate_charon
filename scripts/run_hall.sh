@@ -5,6 +5,8 @@
 # below (pinned, so reruns use the same version). CHARON_DB_* override them with local uncompressed indexes, and REFS
 # with a local copy of the reference. BLAST needs a local database: core_nt matches the web BLAST used to curate the
 # truth sets.
+# Eager cleanup is off and -resume is on, so a rerun reuses every unchanged task (the Hall data is small enough to
+# keep the work directory).
 # Each run has its own --slot_dir, so it does not clash with another pipeline run started from the same directory.
 set -euo pipefail
 
@@ -41,7 +43,7 @@ run() {
         --evaluate_host true --evaluate_microbial true --keep_downloads true \
         --blast_db "$BLAST_DB" --store_dir "$STORE_DIR" \
         --outdir "$outdir/$name" --slot_dir "$outdir/$name/.charon_slots" \
-        -ansi-log false "$@" &> "$outdir/$name/nextflow.log"
+        --eager_cleanup false -resume -ansi-log false "$@" &> "$outdir/$name/nextflow.log"
 }
 
 run ont hall_ont.csv "$ONT_RECORD" "$CHARON_DB_ONT" "$CHARON_DB_HOST_ONLY_ONT" ont "$@"
